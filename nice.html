@@ -4018,27 +4018,6 @@ async function sendMessageToActiveThread(text, image){
     const cur = loadLocalUser();
     if(!cur || !cur.username) return openAuthModal('signIn');
 
-    // Run autofilter / sanitizer BEFORE other checks so size checks use the sanitized text.
-    try {
-        // assume filterOrMaskMessage is available in scope
-        const result = typeof filterOrMaskMessage === 'function'
-            ? filterOrMaskMessage(String(text || ''))
-            : { allowed: true, text: String(text || '') };
-
-        if (!result || result.allowed === false) {
-            // filterOrMaskMessage already shows blocking UI for unsupported-characters / strict blocks
-            return;
-        }
-
-        // Use sanitized text from now on (may contain asterisks)
-        text = result.text;
-
-    } catch (e) {
-        console.error('Autofilter error — aborting send', e);
-        alert('Failed to validate message content. Try again.');
-        return;
-    }
-
     // global cooldown check
     const nowTs = Date.now();
     const lastTs = getLastGlobalSendTs();
@@ -4050,8 +4029,8 @@ async function sendMessageToActiveThread(text, image){
         return;
     }
 
-    // size check (apply to sanitized text + optional dataURL image)
-    const bytes = computeMessageSize(text, image);
+    // size check (apply to raw text + optional dataURL image)
+    const bytes = computeMessageSize(String(text || ''), image);
     if(bytes > SEND_LIMIT_BYTES){
         const kb = Math.round(bytes / 512);
         const limitKb = Math.round(SEND_LIMIT_BYTES / 512);
@@ -4060,7 +4039,7 @@ async function sendMessageToActiveThread(text, image){
     }
 
     const threadRef = ref(db, 'chat/messages/' + activeThreadId);
-    const payload = { username: cur.username, text: String(text||''), ts: serverTimestamp() };
+    const payload = { username: cur.username, text: String(text || ''), ts: serverTimestamp() };
     if(image) payload.image = image;
 
     // set last-send timestamp immediately (prevents quick double-sends)
@@ -4080,6 +4059,7 @@ async function sendMessageToActiveThread(text, image){
         alert('Failed to send message. Try again.');
     }
 }
+
 
 
         
