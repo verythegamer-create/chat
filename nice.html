@@ -3267,96 +3267,21 @@ function renderUserLists(){
       }
     });
   }
+  
+  
 
-if (rightUsersBody) {
+if(rightUsersBody){
   rightUsersBody.innerHTML = '';
 
-  // --- Build a users map robustly (try several fallbacks) ---
-  let usersMap = null;
+  Object.keys(usersSnapshot || {}).forEach(uid => {
+    const user = usersSnapshot[uid];
+    if(!user) return;
 
-  if (typeof usersObj !== 'undefined' && usersObj && Object.keys(usersObj).length) {
-    usersMap = usersObj;
-  } else if (typeof allUsersSnapshot !== 'undefined' && allUsersSnapshot && Object.keys(allUsersSnapshot).length) {
-    usersMap = allUsersSnapshot;
-  } else {
-    // Build a conservative map from any available snapshots (guarantees no undefined)
-    usersMap = {};
+    const displayName = user.username || uid;
+    if(displayName === meName) return;
 
-    // include online users
-    if (onlineUsersSnapshot) {
-      Object.keys(onlineUsersSnapshot).forEach(k => {
-        const u = onlineUsersSnapshot[k];
-        if (!u) return;
-        const name = u.username || k;
-        usersMap[name] = usersMap[name] || u;
-      });
-    }
-
-    // include friends
-    if (friendsSnapshot) {
-      Object.keys(friendsSnapshot).forEach(name => {
-        if (!name) return;
-        usersMap[name] = usersMap[name] || { username: name };
-      });
-    }
-
-    // include outgoing friend requests
-    if (outgoingFriendRequests) {
-      Object.keys(outgoingFriendRequests).forEach(name => {
-        if (!name) return;
-        usersMap[name] = usersMap[name] || { username: name };
-      });
-    }
-
-    // include global friend requests (both sides)
-    if (globalFriendRequests) {
-      Object.keys(globalFriendRequests).forEach(name => {
-        usersMap[name] = usersMap[name] || { username: name };
-        const inner = globalFriendRequests[name];
-        if (inner && typeof inner === 'object') {
-          Object.keys(inner).forEach(other => {
-            usersMap[other] = usersMap[other] || { username: other };
-          });
-        }
-      });
-    }
-  }
-
-  // Convert to array and optionally sort online-first, then alphabetical
-  const usersArr = Object.keys(usersMap || {}).map(key => {
-    // usersMap keys may be username or id; normalize a small object we can use
-    const raw = usersMap[key] || {};
-    return {
-      key,
-      username: raw.username || key,
-      meta: raw
-    };
-  }).filter(u => u && u.username && u.username !== meName);
-
-  // compute online lookup for faster checks
-  const onlineByName = {};
-  if (onlineUsersSnapshot) {
-    Object.values(onlineUsersSnapshot).forEach(o => {
-      if (!o) return;
-      onlineByName[String(o.username || '')] = o;
-    });
-  }
-
-  usersArr.sort((a, b) => {
-    const aOnline = !!onlineByName[a.username];
-    const bOnline = !!onlineByName[b.username];
-    if (aOnline !== bOnline) return aOnline ? -1 : 1; // online first
-    return a.username.toLowerCase().localeCompare(b.username.toLowerCase());
-  });
-
-  // render
-  usersArr.forEach(uEntry => {
-    const displayName = uEntry.username;
-    const meta = uEntry.meta || {};
-
-    // determine whether the user is online (and their lastActive)
-    const onlineEntry = onlineByName[displayName];
-    const active = !!(onlineEntry && onlineEntry.lastActive && (Date.now() - onlineEntry.lastActive <= ACTIVE_MS));
+    const onlineEntry = onlineUsersSnapshot && onlineUsersSnapshot[uid];
+    const active = onlineEntry && onlineEntry.lastActive && (Date.now() - onlineEntry.lastActive <= ACTIVE_MS);
 
     const typingGlob = !!(typingGlobalSnapshot && typingGlobalSnapshot[uidFor(displayName)]);
     const isFriend = !!(friendsSnapshot && friendsSnapshot[displayName]);
@@ -3364,34 +3289,19 @@ if (rightUsersBody) {
     const row = document.createElement('div');
     row.className = 'user-row';
 
-    // avatar block
     const avatarUrl = getAvatarFor(displayName);
     const avatarHtml = avatarUrl
-      ? `
-        <div style="position:relative">
-          <div class="avatar" style="background-image:url('${avatarUrl}');background-size:cover;background-position:center;width:36px;height:36px;border-radius:50%"></div>
-          <div class="status" style="background:${active ? '#3ddc84' : '#6b6e73'};position:absolute;right:-2px;bottom:-2px;width:10px;height:10px;border-radius:50%;border:2px solid #2b2d31"></div>
-        </div>`
-      : `
-        <div style="position:relative">
-          <div class="avatar" style="background:#5865f2;width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700">
-            ${escapeHtml(displayName.slice(0, 2).toUpperCase())}
-          </div>
-          <div class="status" style="background:${active ? '#3ddc84' : '#6b6e73'};position:absolute;right:-2px;bottom:-2px;width:10px;height:10px;border-radius:50%;border:2px solid #2b2d31"></div>
-        </div>`;
+      ? `<div style="position:relative"><div class="avatar" style="background-image:url('${avatarUrl}');background-size:cover;background-position:center;width:36px;height:36px;border-radius:50%"></div><div class="status" style="background:${active? '#3ddc84' : '#6b6e73'};position:absolute;right:-2px;bottom:-2px;width:10px;height:10px;border-radius:50%;border:2px solid #2b2d31"></div></div>`
+      : `<div style="position:relative"><div class="avatar" style="background:#5865f2;width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700">${escapeHtml(displayName.slice(0,2).toUpperCase())}</div><div class="status" style="background:${active? '#3ddc84' : '#6b6e73'};position:absolute;right:-2px;bottom:-2px;width:10px;height:10px;border-radius:50%;border:2px solid #2b2d31"></div></div>`;
 
     row.innerHTML = `
       ${avatarHtml}
       <div class="user-meta">
-        <div class="user-name">
-          ${escapeHtml(displayName)}
-          ${typingGlob ? '<span style="font-weight:500;color:#9ae6b4;margin-left:6px;font-size:12px">typing…</span>' : ''}
-        </div>
+        <div class="user-name">${escapeHtml(displayName)} ${typingGlob?'<span style="font-weight:500;color:#9ae6b4;margin-left:6px;font-size:12px">typing…</span>':''}</div>
         <div class="user-sub">${active ? 'Active' : 'Offline'}</div>
       </div>
     `;
 
-    // friend button logic
     const act = document.createElement('div');
     const me = meName;
 
@@ -3403,47 +3313,37 @@ if (rightUsersBody) {
       globalFriendRequests[displayName][me]
     );
 
-    if (isFriend) {
+    if(isFriend){
       const removeBtn = document.createElement('button');
       removeBtn.className = 'modal-btn modal-btn-secondary';
       removeBtn.style.height = '28px';
       removeBtn.style.marginLeft = '6px';
       removeBtn.textContent = 'Remove';
-      removeBtn.addEventListener('click', ev => {
-        ev.stopPropagation();
-        removeFriend(displayName);
-      });
+      removeBtn.addEventListener('click', (ev)=>{ ev.stopPropagation(); removeFriend(displayName); });
       act.appendChild(removeBtn);
-
-    } else if (sentByMe) {
+    } else if(sentByMe){
       const sentBtn = document.createElement('button');
       sentBtn.className = 'modal-btn modal-btn-secondary';
       sentBtn.style.height = '28px';
       sentBtn.textContent = 'Sent';
-      sentBtn.addEventListener('click', ev => {
-        ev.stopPropagation();
-        if (confirm('Cancel friend request?'))
-          cancelFriendRequest(displayName);
-      });
+      sentBtn.addEventListener('click', (ev)=>{ ev.stopPropagation(); if(confirm('Cancel friend request?')) cancelFriendRequest(displayName); });
       act.appendChild(sentBtn);
-
     } else {
       const addBtn = document.createElement('button');
       addBtn.className = 'modal-btn modal-btn-primary';
       addBtn.style.height = '28px';
       addBtn.textContent = 'Add Friend';
-      addBtn.addEventListener('click', ev => {
-        ev.stopPropagation();
-        sendFriendRequest(displayName);
-      });
+      addBtn.addEventListener('click', (ev)=> { ev.stopPropagation(); sendFriendRequest(displayName); });
       act.appendChild(addBtn);
     }
 
     row.appendChild(act);
-    row.addEventListener('click', () => openDM(displayName));
+    row.addEventListener('click', ()=> openDM(displayName));
     rightUsersBody.appendChild(row);
   });
 }
+
+
 
 
   // (optional) keep existing "All Users" rendering behavior by calling renderAllUsers if it exists
