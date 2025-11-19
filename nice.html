@@ -2064,18 +2064,20 @@ function isImageUrl(url){
 }
 
 
-function renderMessagesForActiveThread(list){
-    // we NO LONGER recreate chatArea or input bar — only update messagesList
-    const messagesList = document.getElementById('messagesList');
-    if (!messagesList) return;
+function renderMessagesForActiveThread(list) {
+    const chatArea = document.getElementById('chatArea');
+    if (!chatArea) return;
 
-    // Build message HTML
-    const html = [];
+    // ------------------------------
+    // 1. BUILD MESSAGES HTML
+    // ------------------------------
+    const containerHtml = [];
+
     list.forEach(msg => {
-        const who = msg.username || 'anon';
-        const time = (msg.ts && typeof msg.ts === 'number')
+        const who = msg.username || "anon";
+        const time = (msg.ts && typeof msg.ts === "number")
             ? new Date(msg.ts).toLocaleString()
-            : 'Just now';
+            : "Just now";
 
         const avatar = getAvatarFor(who);
         const avatarHtml = avatar
@@ -2084,9 +2086,9 @@ function renderMessagesForActiveThread(list){
 
         const imageHtml = msg.image
             ? `<img src="${escapeHtml(msg.image)}" class="message-image" alt="image">`
-            : '';
+            : "";
 
-        html.push(`
+        containerHtml.push(`
             <div class="message" data-msgkey="${escapeHtml(msg.key)}" data-ts="${escapeHtml(String(msg.ts || 0))}">
                 ${avatarHtml}
                 <div class="message-content">
@@ -2094,121 +2096,130 @@ function renderMessagesForActiveThread(list){
                         <span class="message-author">${escapeHtml(who)}</span>
                         <span class="message-time">${escapeHtml(time)}</span>
                     </div>
-                    <div class="message-text">${escapeHtml(msg.text||'')}</div>
+                    <div class="message-text">${escapeHtml(msg.text || "")}</div>
                     ${imageHtml}
                     <div class="reactions" data-reactions-for="${escapeHtml(msg.key)}"></div>
                     <div style="margin-top:8px;">
-                        <button class="modal-btn modal-btn-secondary react-open-btn"
-                                data-msg="${escapeHtml(msg.key)}"
-                                style="height:28px;padding:6px 10px">
-                            React
-                        </button>
+                        <button class="modal-btn modal-btn-secondary react-open-btn" data-msg="${escapeHtml(msg.key)}" style="height:28px;padding:6px 10px">React</button>
                     </div>
                 </div>
             </div>
         `);
     });
 
-    // Update only the messages list
-    messagesList.innerHTML = html.join('');
+    // ------------------------------
+    // 2. WRITE CHAT AREA
+    // ------------------------------
+    chatArea.innerHTML = `
+        <div class="messages-container">
+            <div class="messages" id="messagesList">${containerHtml.join('')}</div>
+            <div class="message-input-container">
+                <div style="display:flex;gap:6px;align-items:center;">
+                  <button id="attachImageBtn" class="modal-btn modal-btn-secondary" title="Attach image" style="height:40px;">📎</button>
+                  <button id="attachGifBtn" class="modal-btn modal-btn-secondary" title="GIFs" style="height:40px;">📺</button>
+                  <button id="emojiInsertBtn" class="modal-btn modal-btn-secondary" title="Insert emoji" style="height:40px;">😊</button>
+                </div>
+                <input type="text" class="message-input" id="activeMessageInput" placeholder="Message">
+                <button id="sendMessageBtn" class="modal-btn modal-btn-primary" style="height:40px;">Send</button>
+            </div>
+        </div>
+    `;
 
-    // -------------------------
-    // MARK READ WHEN AT BOTTOM
-    // -------------------------
-    (function attachMarkReadOnUserAction(){
-        const messagesEl = messagesList;
-        const inputEl = document.getElementById('activeMessageInput');
+    const messagesEl = document.getElementById("messagesList");
+    const inp = document.getElementById("activeMessageInput");
 
-        function lastMessageTsFromDom(){
-            const msgs = messagesEl.querySelectorAll('.message[data-ts]');
-            if(!msgs.length) return 0;
-            const last = msgs[msgs.length - 1];
-            return Number(last.getAttribute('data-ts') || 0) || 0;
+    if (!messagesEl) return;
+
+    // ------------------------------
+    // 3. MARK READ ON SCROLL / FOCUS
+    // ------------------------------
+    (function attachMarkReadOnUserAction() {
+        function lastMessageTsFromDom() {
+            const msgs = messagesEl.querySelectorAll(".message[data-ts]");
+            if (!msgs.length) return 0;
+            return Number(msgs[msgs.length - 1].getAttribute("data-ts") || 0);
         }
 
-        function maybeMarkReadIfAtBottom(){
-            try {
-                const atBottom =
-                    (messagesEl.scrollTop + messagesEl.clientHeight) >=
-                    (messagesEl.scrollHeight - 20);
+        function maybeMarkReadIfAtBottom() {
+            const atBottom =
+                messagesEl.scrollTop + messagesEl.clientHeight >=
+                messagesEl.scrollHeight - 20;
 
-                if(atBottom && activeThreadId){
-                    const lastTs = lastMessageTsFromDom();
-                    if(lastTs > 0){
-                        const prev = getLastRead(activeThreadId) || 0;
-                        if(lastTs > prev) setLastRead(activeThreadId, lastTs);
-                    }
-                }
-            } catch(e){}
+            if (!atBottom || !activeThreadId) return;
+
+            const lastTs = lastMessageTsFromDom();
+            if (!lastTs) return;
+
+            const prev = getLastRead(activeThreadId) || 0;
+            if (lastTs > prev) setLastRead(activeThreadId, lastTs);
         }
 
-        messagesEl.removeEventListener('scroll', maybeMarkReadIfAtBottom);
-        messagesEl.addEventListener('scroll', maybeMarkReadIfAtBottom, { passive:true });
-
-        if(inputEl){
-            inputEl.removeEventListener('focus', maybeMarkReadIfAtBottom);
-            inputEl.addEventListener('focus', maybeMarkReadIfAtBottom);
-        }
+        messagesEl.addEventListener("scroll", maybeMarkReadIfAtBottom, { passive: true });
+        inp?.addEventListener("focus", maybeMarkReadIfAtBottom);
 
         setTimeout(maybeMarkReadIfAtBottom, 50);
     })();
 
-    // -------------------------
-    // URL EMBEDS
-    // -------------------------
+    // ------------------------------
+    // 4. URL EMBED PROCESSING
+    // ------------------------------
     list.forEach(msg => {
         try {
-            const msgKey = msg.key;
-            const msgEl = document.querySelector(`.message[data-msgkey="${CSS.escape(msgKey)}"]`);
-            if(!msgEl) return;
+            const msgEl = document.querySelector(`.message[data-msgkey="${CSS.escape(msg.key)}"]`);
+            if (!msgEl) return;
 
-            const textEl = msgEl.querySelector('.message-text');
-            if(!textEl) return;
+            const textEl = msgEl.querySelector(".message-text");
+            if (!textEl) return;
 
-            const original = msg.text || '';
+            const original = msg.text || "";
             const urlRegex = /https?:\/\/[^\s]+/g;
 
-            let match, lastIndex = 0;
+            let match;
+            let lastIndex = 0;
+            let foundAny = false;
             const frag = document.createDocumentFragment();
-            let found = false;
 
-            function isImageUrl(url){
+            function isImageUrl(url) {
                 return /^data:image\/|(\.(jpe?g|png|gif|webp|bmp|svg)(\?|$))/i.test(url);
             }
-            function makePlainLink(url){
-                const a = document.createElement('a');
+
+            function makePlainLink(url) {
+                const a = document.createElement("a");
                 a.href = url;
-                a.target = '_blank';
-                a.rel = 'noopener noreferrer';
-                a.className = 'message-link message-link-plain';
+                a.target = "_blank";
+                a.rel = "noopener noreferrer";
+                a.className = "message-link message-link-plain";
                 a.textContent = url;
                 return a;
             }
 
-            while((match = urlRegex.exec(original)) !== null){
-                found = true;
+            while ((match = urlRegex.exec(original)) !== null) {
+                foundAny = true;
+
                 const url = match[0];
                 const before = original.slice(lastIndex, match.index);
-                if(before) frag.appendChild(document.createTextNode(before));
+                if (before) frag.appendChild(document.createTextNode(before));
 
-                if(!/^https?:\/\//i.test(url)){
+                if (!/^https?:\/\//i.test(url)) {
                     frag.appendChild(document.createTextNode(url));
-                } else if(isImageUrl(url)){
-                    const a = document.createElement('a');
+                } else if (isImageUrl(url)) {
+                    const a = document.createElement("a");
                     a.href = url;
-                    a.target = '_blank';
-                    a.rel = 'noopener noreferrer';
+                    a.target = "_blank";
+                    a.rel = "noopener noreferrer";
 
-                    const img = document.createElement('img');
+                    const img = document.createElement("img");
                     img.src = url;
-                    img.className = 'message-image message-embed';
+                    img.className = "message-image message-embed";
+                    img.loading = "lazy";
+                    img.referrerPolicy = "no-referrer";
                     img.alt = url;
-                    img.referrerPolicy = 'no-referrer';
-                    img.loading = 'lazy';
 
-                    img.addEventListener('error', () => {
-                        a.replaceWith(makePlainLink(url));
-                    }, { once:true });
+                    img.addEventListener(
+                        "error",
+                        () => a.replaceWith(makePlainLink(url)),
+                        { once: true }
+                    );
 
                     a.appendChild(img);
                     frag.appendChild(a);
@@ -2219,49 +2230,81 @@ function renderMessagesForActiveThread(list){
                 lastIndex = match.index + url.length;
             }
 
-            if(!found) return;
+            if (!foundAny) return;
 
             const tail = original.slice(lastIndex);
-            if(tail) frag.appendChild(document.createTextNode(tail));
+            if (tail) frag.appendChild(document.createTextNode(tail));
 
-            textEl.innerHTML = '';
+            textEl.innerHTML = "";
             textEl.appendChild(frag);
-        } catch(err){}
+        } catch { }
     });
 
-    // -------------------------
-    // SCROLL TO BOTTOM
-    // -------------------------
-    messagesList.scrollTop = messagesList.scrollHeight;
-
-    // -------------------------
-    // RENDER REACTIONS
-    // -------------------------
+    // ------------------------------
+    // 5. REACTIONS
+    // ------------------------------
     list.forEach(msg => {
-        const holder = messagesList.querySelector(`.reactions[data-reactions-for="${CSS.escape(msg.key)}"]`);
-        if(holder){
-            holder.innerHTML = '';
-            const rc = renderReactionsContainer(activeThreadId, msg.key, msg.reactions || null);
-            if(rc && rc.childElementCount){
-                holder.replaceWith(rc);
-            }
-        }
+        const holder = document.querySelector(
+            `.reactions[data-reactions-for="${CSS.escape(msg.key)}"]`
+        );
+        if (!holder) return;
+
+        const rc = renderReactionsContainer(activeThreadId, msg.key, msg.reactions || null);
+        holder.innerHTML = "";
+        if (rc && rc.childElementCount) holder.replaceWith(rc);
     });
 
-    // -------------------------
-    // REACT BUTTONS
-    // -------------------------
-    messagesList.querySelectorAll('.react-open-btn').forEach(btn => {
-        btn.addEventListener('click', ev => {
+    // ------------------------------
+    // 6. REACT BUTTONS
+    // ------------------------------
+    document.querySelectorAll(".react-open-btn").forEach(btn => {
+        btn.addEventListener("click", ev => {
             ev.stopPropagation();
-            const key = btn.getAttribute('data-msg');
             openEmojiPickerAt(btn, emoji => {
-                toggleReaction(activeThreadId, key, emoji);
+                toggleReaction(activeThreadId, btn.dataset.msg, emoji);
                 closeEmojiPickerPopup();
             });
         });
     });
+
+    // ------------------------------
+    // 7. INPUT / SEND / ATTACH
+    // ------------------------------
+    const sendBtn = document.getElementById("sendMessageBtn");
+    const attachBtn = document.getElementById("attachImageBtn");
+    const gifBtn = document.getElementById("attachGifBtn");
+    const emojiInsertBtn = document.getElementById("emojiInsertBtn");
+
+    inp?.addEventListener("input", onMessageInput);
+    inp?.addEventListener("keydown", onMessageKeydown);
+
+    sendBtn?.addEventListener("click", () => {
+        const v = inp.value.trim();
+        if (v) sendMessageToActiveThread(v, null);
+    });
+
+    attachBtn?.addEventListener("click", () => {
+        document.getElementById("messageFile")?.click();
+    });
+
+    gifBtn?.addEventListener("click", ev => {
+        ev.stopPropagation();
+        openGifPickerAt(gifBtn);
+    });
+
+    emojiInsertBtn?.addEventListener("click", () => {
+        openEmojiPickerAt(emojiInsertBtn, emoji => {
+            insertEmojiAtInput(inp, emoji);
+            closeEmojiPickerPopup();
+        });
+    });
+
+    // ------------------------------
+    // 8. SCROLL TO BOTTOM
+    // ------------------------------
+    messagesEl.scrollTop = messagesEl.scrollHeight;
 }
+
 
 
 
