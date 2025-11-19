@@ -818,7 +818,7 @@
                 <div class="channel-name">Select a conversation</div>
             </div>
             <div class="chat-area" id="chatArea">
-                <div class="no-chat-selected"><div style="padding:18px;">👋 Choose a friend or channel to start messaging</div></div>
+                <div class="no-chat-selected"><div style="padding:18px;"></div></div>
             </div>
         </div>
 
@@ -1301,11 +1301,9 @@ async function changeUsername(oldUsername, newUsername){
             .forEach(el => { try { el.textContent = ''; } catch(e){} });
         } catch(e){}
 
-        // simple chat area reset
-        try {
-          const chatArea = document.getElementById('chatArea');
-          if (chatArea) chatArea.innerHTML = `<div class="no-chat-selected"><div style="padding:18px;">👋 Choose a friend or channel to start messaging</div></div>`;
-        } catch(e){}
+
+        
+        
 
         // clear in-memory snapshots (best-effort)
         try { if (typeof friendsSnapshot !== 'undefined') friendsSnapshot = {}; } catch(e){}
@@ -2064,246 +2062,249 @@ function isImageUrl(url){
 }
 
 
-function renderMessagesForActiveThread(list) {
-    const chatArea = document.getElementById('chatArea');
-    if (!chatArea) return;
+function renderMessagesForActiveThread(list){
+  const chatArea = document.getElementById('chatArea');
+  if(!chatArea) return;
 
-    // ------------------------------
-    // 1. BUILD MESSAGES HTML
-    // ------------------------------
-    const containerHtml = [];
+  // --- 1) Capture existing input state (value, caret, focus) if present ---
+  const prevInput = document.getElementById('activeMessageInput');
+  const inputState = prevInput ? {
+    value: prevInput.value,
+    selStart: prevInput.selectionStart,
+    selEnd: prevInput.selectionEnd,
+    focused: (document.activeElement === prevInput)
+  } : null;
 
+  // --- 2) Ensure messagesList exists but DO NOT replace chatArea whole markup ---
+  let messagesList = chatArea.querySelector('#messagesList');
+  if(!messagesList){
+    // create minimal wrapper and insert it without destroying siblings (especially input area)
+    const wrapper = document.createElement('div');
+    wrapper.className = 'messages-container';
+    const msgs = document.createElement('div');
+    msgs.className = 'messages';
+    msgs.id = 'messagesList';
+    wrapper.appendChild(msgs);
+
+    // try to insert before existing input container if present, otherwise append
+    const existingInputContainer = chatArea.querySelector('.message-input-container');
+    if(existingInputContainer){
+      chatArea.insertBefore(wrapper, existingInputContainer);
+    } else {
+      chatArea.appendChild(wrapper);
+    }
+    messagesList = msgs;
+  }
+
+  // --- 3) Preserve scroll position/atBottom status so we can restore sensibly ---
+  const prevScrollTop = messagesList.scrollTop || 0;
+  const prevScrollHeight = messagesList.scrollHeight || 0;
+  const atBottomBefore = (prevScrollTop + messagesList.clientHeight) >= (prevScrollHeight - 20);
+
+  // --- 4) Build messages HTML (same markup as before) ---
+  const htmlParts = [];
+  for(const msg of list){
+    const who = msg.username || 'anon';
+    const time = (msg.ts && typeof msg.ts === 'number') ? new Date(msg.ts).toLocaleString() : 'Just now';
+    const avatar = getAvatarFor(who);
+    const avatarHtml = avatar
+      ? `<div class="message-avatar" style="background-image:url('${avatar}');background-size:cover;background-position:center;margin-right:16px;flex-shrink:0;width:40px;height:40px;border-radius:50%"></div>`
+      : `<div class="message-avatar" style="width:40px;height:40px;border-radius:50%;background:${who === (loadLocalUser()?.username) ? '#5865f2' : '#57a55a'};margin-right:16px;flex-shrink:0;"></div>`;
+    const imageHtml = msg.image ? `<img src="${escapeHtml(msg.image)}" class="message-image" alt="image">` : '';
+
+    htmlParts.push(`
+      <div class="message" data-msgkey="${escapeHtml(msg.key)}" data-ts="${escapeHtml(String(msg.ts || 0))}">
+          ${avatarHtml}
+          <div class="message-content">
+              <div class="message-header">
+                  <span class="message-author">${escapeHtml(who)}</span>
+                  <span class="message-time">${escapeHtml(time)}</span>
+              </div>
+              <div class="message-text">${escapeHtml(msg.text||'')}</div>
+              ${imageHtml}
+              <div class="reactions" data-reactions-for="${escapeHtml(msg.key)}"></div>
+              <div style="margin-top:8px;">
+                  <button class="modal-btn modal-btn-secondary react-open-btn" data-msg="${escapeHtml(msg.key)}" style="height:28px;padding:6px 10px">React</button>
+              </div>
+          </div>
+      </div>
+    `);
+  }
+
+  // --- 5) Replace only messagesList contents (non-destructive) ---
+  messagesList.innerHTML = htmlParts.join('');
+
+  // --- 6) URL embed processing (wrapped in try so single failure won't break everything) ---
+  try {
     list.forEach(msg => {
-        const who = msg.username || "anon";
-        const time = (msg.ts && typeof msg.ts === "number")
-            ? new Date(msg.ts).toLocaleString()
-            : "Just now";
+      try {
+        if(!msg.key) return;
+        const msgEl = messagesList.querySelector(`.message[data-msgkey="${CSS.escape(msg.key)}"]`);
+        if(!msgEl) return;
+        const textEl = msgEl.querySelector('.message-text');
+        if(!textEl) return;
+        const original = msg.text || '';
+        const urlRegex = /https?:\/\/[^\s]+/g;
+        let match, lastIndex = 0, foundAny = false;
+        const frag = document.createDocumentFragment();
 
-        const avatar = getAvatarFor(who);
-        const avatarHtml = avatar
-            ? `<div class="message-avatar" style="background-image:url('${avatar}');background-size:cover;background-position:center;margin-right:16px;flex-shrink:0;width:40px;height:40px;border-radius:50%"></div>`
-            : `<div class="message-avatar" style="width:40px;height:40px;border-radius:50%;background:${who === (loadLocalUser()?.username) ? '#5865f2' : '#57a55a'};margin-right:16px;flex-shrink:0;"></div>`;
-
-        const imageHtml = msg.image
-            ? `<img src="${escapeHtml(msg.image)}" class="message-image" alt="image">`
-            : "";
-
-        containerHtml.push(`
-            <div class="message" data-msgkey="${escapeHtml(msg.key)}" data-ts="${escapeHtml(String(msg.ts || 0))}">
-                ${avatarHtml}
-                <div class="message-content">
-                    <div class="message-header">
-                        <span class="message-author">${escapeHtml(who)}</span>
-                        <span class="message-time">${escapeHtml(time)}</span>
-                    </div>
-                    <div class="message-text">${escapeHtml(msg.text || "")}</div>
-                    ${imageHtml}
-                    <div class="reactions" data-reactions-for="${escapeHtml(msg.key)}"></div>
-                    <div style="margin-top:8px;">
-                        <button class="modal-btn modal-btn-secondary react-open-btn" data-msg="${escapeHtml(msg.key)}" style="height:28px;padding:6px 10px">React</button>
-                    </div>
-                </div>
-            </div>
-        `);
-    });
-
-    // ------------------------------
-    // 2. WRITE CHAT AREA
-    // ------------------------------
-    chatArea.innerHTML = `
-        <div class="messages-container">
-            <div class="messages" id="messagesList">${containerHtml.join('')}</div>
-            <div class="message-input-container">
-                <div style="display:flex;gap:6px;align-items:center;">
-                  <button id="attachImageBtn" class="modal-btn modal-btn-secondary" title="Attach image" style="height:40px;">📎</button>
-                  <button id="attachGifBtn" class="modal-btn modal-btn-secondary" title="GIFs" style="height:40px;">📺</button>
-                  <button id="emojiInsertBtn" class="modal-btn modal-btn-secondary" title="Insert emoji" style="height:40px;">😊</button>
-                </div>
-                <input type="text" class="message-input" id="activeMessageInput" placeholder="Message">
-                <button id="sendMessageBtn" class="modal-btn modal-btn-primary" style="height:40px;">Send</button>
-            </div>
-        </div>
-    `;
-
-    const messagesEl = document.getElementById("messagesList");
-    const inp = document.getElementById("activeMessageInput");
-
-    if (!messagesEl) return;
-
-    // ------------------------------
-    // 3. MARK READ ON SCROLL / FOCUS
-    // ------------------------------
-    (function attachMarkReadOnUserAction() {
-        function lastMessageTsFromDom() {
-            const msgs = messagesEl.querySelectorAll(".message[data-ts]");
-            if (!msgs.length) return 0;
-            return Number(msgs[msgs.length - 1].getAttribute("data-ts") || 0);
+        function isImageUrl(url) {
+          return /^data:image\/|(\.(jpe?g|png|gif|webp|bmp|svg)(\?|$))/i.test(url);
+        }
+        function makePlainLink(url) {
+          const a = document.createElement('a');
+          a.href = url;
+          a.target = '_blank';
+          a.rel = 'noopener noreferrer';
+          a.className = 'message-link message-link-plain';
+          a.textContent = url;
+          return a;
         }
 
-        function maybeMarkReadIfAtBottom() {
-            const atBottom =
-                messagesEl.scrollTop + messagesEl.clientHeight >=
-                messagesEl.scrollHeight - 20;
+        while((match = urlRegex.exec(original)) !== null){
+          foundAny = true;
+          const url = match[0];
+          const before = original.slice(lastIndex, match.index);
+          if(before) frag.appendChild(document.createTextNode(before));
 
-            if (!atBottom || !activeThreadId) return;
-
-            const lastTs = lastMessageTsFromDom();
-            if (!lastTs) return;
-
-            const prev = getLastRead(activeThreadId) || 0;
-            if (lastTs > prev) setLastRead(activeThreadId, lastTs);
+          if(isImageUrl(url)){
+            const a = document.createElement('a');
+            a.href = url;
+            a.target = '_blank';
+            a.rel = 'noopener noreferrer';
+            const img = document.createElement('img');
+            img.src = url;
+            img.className = 'message-image message-embed';
+            img.alt = url;
+            img.referrerPolicy = 'no-referrer';
+            img.loading = 'lazy';
+            img.addEventListener('error', () => { a.replaceWith(makePlainLink(url)); }, { once:true });
+            a.appendChild(img);
+            frag.appendChild(a);
+          } else {
+            frag.appendChild(makePlainLink(url));
+          }
+          lastIndex = match.index + url.length;
         }
 
-        messagesEl.addEventListener("scroll", maybeMarkReadIfAtBottom, { passive: true });
-        inp?.addEventListener("focus", maybeMarkReadIfAtBottom);
+        if(!foundAny) return;
+        const tail = original.slice(lastIndex);
+        if(tail) frag.appendChild(document.createTextNode(tail));
+        textEl.innerHTML = '';
+        textEl.appendChild(frag);
+      } catch(e){ console.warn('embed processing failed', e); }
+    });
+  } catch(_) {}
 
-        setTimeout(maybeMarkReadIfAtBottom, 50);
-    })();
-
-    // ------------------------------
-    // 4. URL EMBED PROCESSING
-    // ------------------------------
+  // --- 7) Re-render reactions safely ---
+  try {
     list.forEach(msg => {
-        try {
-            const msgEl = document.querySelector(`.message[data-msgkey="${CSS.escape(msg.key)}"]`);
-            if (!msgEl) return;
+      const holder = messagesList.querySelector(`.reactions[data-reactions-for="${CSS.escape(msg.key)}"]`);
+      if(!holder) return;
+      const rc = renderReactionsContainer(activeThreadId, msg.key, msg.reactions || null);
+      if(rc && rc.childElementCount) holder.replaceWith(rc);
+      else holder.innerHTML = '';
+    });
+  } catch(_) {}
 
-            const textEl = msgEl.querySelector(".message-text");
-            if (!textEl) return;
+  // --- 8) Re-attach react buttons ---
+  messagesList.querySelectorAll('.react-open-btn').forEach(btn=>{
+    // remove previous click handler by cloning node trick to avoid duplicates
+    const clone = btn.cloneNode(true);
+    btn.parentNode.replaceChild(clone, btn);
+    clone.addEventListener('click', ev=>{
+      ev.stopPropagation();
+      const key = clone.getAttribute('data-msg');
+      openEmojiPickerAt(clone, (emoji) => {
+        toggleReaction(activeThreadId, key, emoji);
+        closeEmojiPickerPopup();
+      });
+    });
+  });
 
-            const original = msg.text || "";
-            const urlRegex = /https?:\/\/[^\s]+/g;
+  // --- 9) Restore scroll position or auto-scroll if was at bottom ---
+  if(atBottomBefore){
+    messagesList.scrollTop = messagesList.scrollHeight;
+  } else {
+    // try to keep relative position
+    const newScrollHeight = messagesList.scrollHeight || 0;
+    const desired = Math.max(0, newScrollHeight - (prevScrollHeight - prevScrollTop));
+    messagesList.scrollTop = desired;
+  }
 
-            let match;
-            let lastIndex = 0;
-            let foundAny = false;
-            const frag = document.createDocumentFragment();
+  // --- 10) Restore input element and its state (value, caret, focus), and (re)wire handlers idempotently ---
+  (function restoreInputAndHandlers(){
+    // get new current input (may be newly created by other code)
+    const newInput = document.getElementById('activeMessageInput');
 
-            function isImageUrl(url) {
-                return /^data:image\/|(\.(jpe?g|png|gif|webp|bmp|svg)(\?|$))/i.test(url);
-            }
+    // if we had a previous state, restore it
+    if(inputState && newInput){
+      try {
+        newInput.value = inputState.value || '';
+        if(typeof newInput.setSelectionRange === 'function' && typeof inputState.selStart === 'number'){
+          newInput.setSelectionRange(inputState.selStart, inputState.selEnd);
+        }
+        if(inputState.focused) {
+          try { newInput.focus(); } catch(e){}
+        }
+      } catch(e){ console.warn('restore input failed', e); }
+    }
 
-            function makePlainLink(url) {
-                const a = document.createElement("a");
-                a.href = url;
-                a.target = "_blank";
-                a.rel = "noopener noreferrer";
-                a.className = "message-link message-link-plain";
-                a.textContent = url;
-                return a;
-            }
+    // safely (re)attach handlers WITHOUT creating duplicates:
+    if(newInput){
+      try { newInput.removeEventListener('input', onMessageInput); } catch(_) {}
+      try { newInput.removeEventListener('keydown', onMessageKeydown); } catch(_) {}
+      newInput.addEventListener('input', onMessageInput);
+      newInput.addEventListener('keydown', onMessageKeydown);
+    }
 
-            while ((match = urlRegex.exec(original)) !== null) {
-                foundAny = true;
+    // send / attach / gif / emoji buttons
+    const sendBtn = document.getElementById('sendMessageBtn');
+    const attachBtn = document.getElementById('attachImageBtn');
+    const gifBtn = document.getElementById('attachGifBtn');
+    const emojiInsertBtn = document.getElementById('emojiInsertBtn');
 
-                const url = match[0];
-                const before = original.slice(lastIndex, match.index);
-                if (before) frag.appendChild(document.createTextNode(before));
+    // remove any previous listeners by cloning (simpler and safe)
+    function safeReplaceAndBind(selectorEl, bindFn){
+      if(!selectorEl) return;
+      const clone = selectorEl.cloneNode(true);
+      selectorEl.parentNode.replaceChild(clone, selectorEl);
+      bindFn(clone);
+    }
 
-                if (!/^https?:\/\//i.test(url)) {
-                    frag.appendChild(document.createTextNode(url));
-                } else if (isImageUrl(url)) {
-                    const a = document.createElement("a");
-                    a.href = url;
-                    a.target = "_blank";
-                    a.rel = "noopener noreferrer";
-
-                    const img = document.createElement("img");
-                    img.src = url;
-                    img.className = "message-image message-embed";
-                    img.loading = "lazy";
-                    img.referrerPolicy = "no-referrer";
-                    img.alt = url;
-
-                    img.addEventListener(
-                        "error",
-                        () => a.replaceWith(makePlainLink(url)),
-                        { once: true }
-                    );
-
-                    a.appendChild(img);
-                    frag.appendChild(a);
-                } else {
-                    frag.appendChild(makePlainLink(url));
-                }
-
-                lastIndex = match.index + url.length;
-            }
-
-            if (!foundAny) return;
-
-            const tail = original.slice(lastIndex);
-            if (tail) frag.appendChild(document.createTextNode(tail));
-
-            textEl.innerHTML = "";
-            textEl.appendChild(frag);
-        } catch { }
+    safeReplaceAndBind(sendBtn, (el)=>{
+      el.addEventListener('click', ()=>{
+        const v = (document.getElementById('activeMessageInput')?.value || '').trim();
+        if(v) sendMessageToActiveThread(v, null);
+      });
     });
 
-    // ------------------------------
-    // 5. REACTIONS
-    // ------------------------------
-    list.forEach(msg => {
-        const holder = document.querySelector(
-            `.reactions[data-reactions-for="${CSS.escape(msg.key)}"]`
-        );
-        if (!holder) return;
-
-        const rc = renderReactionsContainer(activeThreadId, msg.key, msg.reactions || null);
-        holder.innerHTML = "";
-        if (rc && rc.childElementCount) holder.replaceWith(rc);
+    safeReplaceAndBind(attachBtn, (el)=>{
+      el.addEventListener('click', ()=>{
+        document.getElementById('messageFile')?.click();
+      });
     });
 
-    // ------------------------------
-    // 6. REACT BUTTONS
-    // ------------------------------
-    document.querySelectorAll(".react-open-btn").forEach(btn => {
-        btn.addEventListener("click", ev => {
-            ev.stopPropagation();
-            openEmojiPickerAt(btn, emoji => {
-                toggleReaction(activeThreadId, btn.dataset.msg, emoji);
-                closeEmojiPickerPopup();
-            });
-        });
-    });
-
-    // ------------------------------
-    // 7. INPUT / SEND / ATTACH
-    // ------------------------------
-    const sendBtn = document.getElementById("sendMessageBtn");
-    const attachBtn = document.getElementById("attachImageBtn");
-    const gifBtn = document.getElementById("attachGifBtn");
-    const emojiInsertBtn = document.getElementById("emojiInsertBtn");
-
-    inp?.addEventListener("input", onMessageInput);
-    inp?.addEventListener("keydown", onMessageKeydown);
-
-    sendBtn?.addEventListener("click", () => {
-        const v = inp.value.trim();
-        if (v) sendMessageToActiveThread(v, null);
-    });
-
-    attachBtn?.addEventListener("click", () => {
-        document.getElementById("messageFile")?.click();
-    });
-
-    gifBtn?.addEventListener("click", ev => {
+    safeReplaceAndBind(gifBtn, (el)=>{
+      el.addEventListener('click', (ev)=>{
         ev.stopPropagation();
-        openGifPickerAt(gifBtn);
+        openGifPickerAt(el);
+      });
     });
 
-    emojiInsertBtn?.addEventListener("click", () => {
-        openEmojiPickerAt(emojiInsertBtn, emoji => {
-            insertEmojiAtInput(inp, emoji);
-            closeEmojiPickerPopup();
+    safeReplaceAndBind(emojiInsertBtn, (el)=>{
+      el.addEventListener('click', ()=>{
+        openEmojiPickerAt(el, (emoji)=>{
+          insertEmojiAtInput(document.getElementById('activeMessageInput'), emoji);
+          closeEmojiPickerPopup();
         });
+      });
     });
+  })();
 
-    // ------------------------------
-    // 8. SCROLL TO BOTTOM
-    // ------------------------------
-    messagesEl.scrollTop = messagesEl.scrollHeight;
+  // done
 }
+
 
 
 
@@ -2701,6 +2702,128 @@ function updateGifGridFavoriteStates(){
             }catch(e){ console.warn('image processing failed', e); alert('Image processing failed. Try a smaller image.'); }
             finally{ document.getElementById('messageFile').value=''; }
         });
+        
+        
+        /* ---------- Typing UI: subscribe per-thread + render ---------- */
+
+// track per-thread unsubscribe
+let typingThreadUnsubscribe = null;
+
+// normalize snapshot object into a simple map of key->value
+function normalizeTypingObj(obj){
+  if(!obj || typeof obj !== 'object') return {};
+  // if snapshot appears to contain multiple threads, bail with the object itself
+  return obj;
+}
+
+// Build display text from a simple object map (key->value)
+function buildTypingTextFromObj(obj){
+  try{
+    if(!obj || typeof obj !== 'object') return '';
+    // exclude local user
+    const localName = (typeof loadLocalUser === 'function' && loadLocalUser()?.username) || (typeof CURRENT_USER !== 'undefined' && CURRENT_USER?.username) || null;
+    const localKey = localName ? uidFor(localName) : null;
+
+    const typers = Object.keys(obj || {}).filter(k => {
+      if(!obj.hasOwnProperty(k)) return false;
+      if(k === localKey || k === localName) return false;
+      const v = obj[k];
+      if(v === true) return true;
+      if(v === 'true') return true;
+      if(typeof v === 'string' && v.length > 0 && v !== 'false') return true;
+      if(v && typeof v === 'object') return true;
+      return false;
+    });
+
+    if(!typers.length) return '';
+
+    const names = typers.map(k => {
+      const v = obj[k];
+      if(typeof v === 'string' && v !== 'true' && v !== 'false') return v;
+      try { return decodeURIComponent(k); } catch(e) { return k; }
+    }).filter(Boolean).slice(0,3);
+
+    if(names.length === 1) return `${names[0]} is typing…`;
+    if(names.length === 2) return `${names[0]} & ${names[1]} are typing…`;
+    if(names.length > 2) return `${names[0]} & ${names[1]} are typing…`;
+    return '';
+  } catch(e){
+    console.warn('buildTypingTextFromObj', e);
+    return '';
+  }
+}
+
+// show typing indicator under chat header for active thread
+function showTypingUnderHeader(obj){
+  try{
+    const header = document.getElementById('chatHeader') || document.querySelector('.chat-header');
+    if(!header) return;
+    let ind = document.getElementById('typingIndicator');
+    if(!ind){
+      ind = document.createElement('div');
+      ind.id = 'typingIndicator';
+      ind.className = 't-typing-indicator';
+      ind.style.fontSize = '12px';
+      ind.style.opacity = '.85';
+      ind.style.marginTop = '4px';
+      ind.style.color = '#666';
+      header.appendChild(ind);
+    }
+    const text = buildTypingTextFromObj(obj);
+    if(!text){
+      ind.textContent = '';
+      ind.style.display = 'none';
+    } else {
+      ind.textContent = text;
+      ind.style.display = '';
+    }
+  }catch(e){ console.warn('showTypingUnderHeader', e); }
+}
+
+// subscribe to typing for a given thread id (auto-unsubscribes previous)
+function subscribeTypingForThread(threadId){
+  try{
+    // detach previous
+    if(typeof typingThreadUnsubscribe === 'function'){ try{ typingThreadUnsubscribe(); }catch(e){} typingThreadUnsubscribe = null; }
+    if(!threadId){
+      showTypingUnderHeader({});
+      return;
+    }
+    // persist active thread id so other parts (setTyping) already use activeThreadId
+    window.activeThreadId = threadId;
+
+    const threadRef = ref(db, 'chat/typing/' + threadId);
+    typingThreadUnsubscribe = onValue(threadRef, snap => {
+      const val = snap.exists() ? snap.val() : {};
+      // val may be { uid: true } or { username: true } — show accordingly
+      showTypingUnderHeader(val);
+    });
+    // also immediately clear old indicator (on switch)
+    showTypingUnderHeader({});
+  }catch(e){ console.warn('subscribeTypingForThread', e); }
+}
+
+// helper used by renderUserLists() to show "typing…" in DM rows
+function isUserTypingInThread(threadId, friendName){
+  try{
+    if(!threadId) return false;
+    // typingGlobalSnapshot is updated elsewhere in your code (you already set this)
+    if(!typingGlobalSnapshot || typeof typingGlobalSnapshot !== 'object') return false;
+    // support both shapes:
+    // 1) per-thread: typingGlobalSnapshot[threadId] => { uid: true }
+    // 2) flat: typingGlobalSnapshot => { uid: true } (less likely but handle)
+    const obj = (typingGlobalSnapshot[threadId] && typeof typingGlobalSnapshot[threadId] === 'object') ? typingGlobalSnapshot[threadId] : typingGlobalSnapshot;
+    if(!obj) return false;
+    const key = uidFor(friendName) || friendName;
+    if(obj[key]) return true;
+    // maybe values are usernames: check values
+    return Object.values(obj).some(v => typeof v === 'string' && v === friendName);
+  } catch(e){
+    console.warn('isUserTypingInThread', e);
+    return false;
+  }
+}
+
 
         /* typing indicator wiring (re-uses earlier logic) */
         let typingTimer = null;
@@ -2977,6 +3100,8 @@ onValue(ref(db,'users'), snap => {
                 renderFriendRequestsUI();
             }
         }
+        
+        
 
         async function removeFriend(friendName){
             const cur = loadLocalUser();
@@ -3020,6 +3145,9 @@ onValue(ref(db,'users'), snap => {
                 renderUserLists();
             }catch(e){ console.error('acceptFriendRequest', e); alert('Failed to accept request'); }
         }
+        
+        
+        
 
 
 function renderUserLists(){
@@ -3050,7 +3178,7 @@ function renderUserLists(){
       // presence / typing
       const friendOnlineEntry = Object.values(onlineUsersSnapshot || {}).find(o => String(o.username) === String(friendName));
       const active = friendOnlineEntry && (friendOnlineEntry.lastActive && (Date.now() - friendOnlineEntry.lastActive <= ACTIVE_MS));
-      const typingGlob = !!(typingGlobalSnapshot && typingGlobalSnapshot[uidFor(friendName)]);
+      const typingGlob = isUserTypingInThread(threadId, friendName);
 
       let el = existing.get(friendName);
 
@@ -3214,27 +3342,39 @@ function renderUserLists(){
 
 
 
-        function renderAllUsers(usersObj){
-            const allContainer = document.getElementById('allUsersContainer');
-            const cur = loadLocalUser();
-            if(!allContainer) return;
-            allContainer.innerHTML = '';
-            if(!cur || !cur.username) return;
-            Object.keys(friendsSnapshot || {}).sort().forEach(friendName => {
-                if(!friendName) return;
-                const el = document.createElement('div');
-                const onlineEntry = Object.values(onlineUsersSnapshot || {}).find(o => String(o.username) === String(friendName));
-                const isOnline = !!onlineEntry;
-                if(!userMatchesFilter(friendName)) return; // skip this friend when filtering
+function renderAllUsers(usersObj){
+    const allContainer = document.getElementById('allUsersContainer');
+    const cur = loadLocalUser();
+    if (!allContainer) return;
+    allContainer.innerHTML = '';
+    if (!cur || !cur.username) return;
 
-                el.className = 'dm-friend-item';
-el.innerHTML = `<div class="dm-friend-avatar">...</div>
-                <div class="dm-friend-name">${highlightMatch(friendName, userSearchQuery)}</div>`;
+    // Loop over ALL users instead of friendsSnapshot
+    Object.keys(usersObj || {}).sort().forEach(username => {
+        if (!username) return;
 
-                el.addEventListener('click', ()=> openDM(friendName));
-                allContainer.appendChild(el);
-            });
-        }
+        // Skip if the filter fails
+        if (!userMatchesFilter(username)) return;
+
+        // Check if this user is online
+        const onlineEntry = Object.values(onlineUsersSnapshot || {})
+            .find(o => String(o.username) === String(username));
+        const isOnline = !!onlineEntry;
+
+        // Create entry
+        const el = document.createElement('div');
+        el.className = 'dm-friend-item' + (isOnline ? ' online' : '');
+
+        el.innerHTML = `
+            <div class="dm-friend-avatar">${isOnline ? "🟢" : "⚪"}</div>
+            <div class="dm-friend-name">${highlightMatch(username, userSearchQuery)}</div>
+        `;
+
+        el.addEventListener('click', () => openDM(username));
+        allContainer.appendChild(el);
+    });
+}
+
 
         /* ----------------- Friend Requests UI rendering ----------------- */
         // ----------------- Friend Requests UI rendering (replace your current function) -----------------
@@ -3306,7 +3446,7 @@ function renderFriendRequestsUI(){
             document.getElementById('sidebarHeader').textContent = 'Direct Messages';
             document.querySelectorAll('.nav-item').forEach(item => item.classList.remove('active'));
             document.getElementById('navDM').classList.add('active');
-            showNoChatSelected();
+
         }
         function showServerChannels(){
             document.getElementById('friendsListView').style.display='none';
@@ -3314,7 +3454,7 @@ function renderFriendRequestsUI(){
             document.getElementById('sidebarHeader').textContent = 'Main Server';
             document.querySelectorAll('.nav-item').forEach(item => item.classList.remove('active'));
             document.getElementById('navServer').classList.add('active');
-            showNoChatSelected();
+
         }
         function showNoChatSelected(){
             document.getElementById('chatHeader').innerHTML = '<div class="channel-name">Select a conversation</div>';
@@ -3323,14 +3463,123 @@ function renderFriendRequestsUI(){
         }
 
 
+function buildTypingText(obj){
+  try{
+    if(!obj || typeof obj !== 'object') return '';
+    const localName = (typeof loadLocalUser === 'function' && loadLocalUser()?.username) || (typeof CURRENT_USER !== 'undefined' && CURRENT_USER?.username) || null;
+    const localKey = localName ? uidFor(localName) : null;
+
+    const typers = Object.keys(obj || {}).filter(k => {
+      if(!obj.hasOwnProperty(k)) return false;
+      if(k === localKey || k === localName) return false;
+      const v = obj[k];
+      if(v === true) return true;
+      if(v === 'true') return true;
+      if(typeof v === 'string' && v.length > 0 && v !== 'false') return true;
+      if(v && typeof v === 'object') return true;
+      return false;
+    });
+
+    if(!typers.length) return '';
+
+    const names = typers.map(k => {
+      const v = obj[k];
+      if(typeof v === 'string' && v !== 'true' && v !== 'false') return v;
+      try { return decodeURIComponent(k); } catch(e) { return k; }
+    }).filter(Boolean).slice(0,3);
+
+    if(names.length === 1) return `${names[0]} is typing…`;
+    if(names.length === 2) return `${names[0]} & ${names[1]} are typing…`;
+    return `${names[0]} & ${names[1]} are typing…`;
+  }catch(e){
+    console.warn('buildTypingText error', e);
+    return '';
+  }
+}
+
+function ensureTypingIndicatorAboveInput(){
+  // Try common message input IDs/classes you already use
+  const input = document.getElementById('activeMessageInput')
+              || document.querySelector('#activeMessageInput, #t-chat-input, .message-input, textarea.message-input, input.message-input');
+  if(!input) return null;
+  // prefer placing inside the input's immediate container so it visually appears above the box
+  const container = input.parentElement || document.body;
+  let ind = container.querySelector('#typingIndicatorAboveInput');
+  if(!ind){
+    ind = document.createElement('div');
+    ind.id = 'typingIndicatorAboveInput';
+    ind.className = 'typing-indicator-above-input';
+    // minimal default styling (you can replace with CSS)
+    ind.style.fontSize = '13px';
+    ind.style.color = '#6b6e73';
+    ind.style.margin = '6px 0 4px 0';
+    ind.style.minHeight = '16px';
+    ind.style.lineHeight = '16px';
+    // insert it immediately before the input in the same container (so it's above it)
+    // if the container already contains the input, insert before the input element
+    if(container.contains(input)) container.insertBefore(ind, input);
+    else container.appendChild(ind);
+  }
+  return ind;
+}
+
+// The handler to attach to your DB typing snapshot for the active thread
+function showTypingAboveInput(snap){
+  try{
+    const raw = snap && snap.val ? snap.val() : (snap || {});
+    // If you sometimes attach to a parent that contains multiple thread children,
+    // prefer the activeThreadId child if present:
+    const threadKey = window.activeThreadId || window.currentChannelId || 'global';
+    let usersObj = (raw && raw[threadKey] && typeof raw[threadKey] === 'object') ? raw[threadKey] : raw;
+    if(!usersObj || typeof usersObj !== 'object') usersObj = {};
+
+    const text = buildTypingText(usersObj);
+    const ind = ensureTypingIndicatorAboveInput();
+    if(!ind) return;
+    if(!text){
+      ind.textContent = '';
+      ind.style.display = 'none';
+    } else {
+      ind.textContent = text;
+      ind.style.display = '';
+    }
+  }catch(e){
+    console.warn('showTypingAboveInput', e);
+  }
+}
+
 
 async function openDM(friendName){
   const cur = loadLocalUser();
-  if(!cur || !cur.username) { openAuthModal('signIn'); return; }
   const thread = threadIdForDM(cur.username, friendName);
-  showFriendsList();
+   subscribeTypingForThread = (thread) => {
+     // detach previous if you have code for that...
+     window.activeThreadId = thread;
+     // attach new:
+     onValue(ref(db, 'chat/typing/' + thread), showTypingAboveInput);
+   };
 
-  // create header DOM nodes so we can set avatar via JS
+
+  if(!cur || !cur.username) { openAuthModal('signIn'); return; }
+
+
+
+  // remove any "no chat selected" marker (element or class) so UI shows the chat
+  try {
+    // remove element with id
+    const noEl = document.getElementById('no-chat-selected');
+    if(noEl) noEl.remove();
+
+    // remove class from any elements that might use it
+    document.querySelectorAll('.no-chat-selected').forEach(el => el.classList.remove('no-chat-selected'));
+  } catch(e){ console.warn('failed to remove no-chat-selected marker', e); }
+  
+  
+
+  // show friends list UI if you have one
+  if (typeof showFriendsList === 'function') showFriendsList();
+
+  // ---------- header ----------
   const header = document.createElement('div');
   header.style.display = 'flex';
   header.style.alignItems = 'center';
@@ -3342,8 +3591,7 @@ async function openDM(friendName){
   avatarDiv.style.height = '32px';
   avatarDiv.style.borderRadius = '50%';
   avatarDiv.style.flexShrink = '0';
-  // placeholder background (will be updated)
-  avatarDiv.style.background = '#5865f2';
+  avatarDiv.style.background = '#5865f2'; // placeholder
 
   const nameDiv = document.createElement('div');
   nameDiv.className = 'channel-name';
@@ -3353,8 +3601,10 @@ async function openDM(friendName){
   header.appendChild(nameDiv);
 
   const chatHeader = document.getElementById('chatHeader');
-  if(chatHeader) chatHeader.innerHTML = '';
-  if(chatHeader) chatHeader.appendChild(header);
+  if(chatHeader){
+    chatHeader.innerHTML = '';
+    chatHeader.appendChild(header);
+  }
 
   // set avatar if available (synchronously if snapshot exists)
   try {
@@ -3368,18 +3618,191 @@ async function openDM(friendName){
       avatarDiv.style.backgroundImage = '';
       avatarDiv.textContent = friendName.slice(0,2).toUpperCase();
     }
+  } catch(e){ /* ignore */ }
+
+  // ---------- ensure chat scaffold (only create if missing) ----------
+  const chatArea = document.getElementById('chatArea');
+  if(!chatArea) {
+    console.warn('openDM: #chatArea not found');
+    return;
+  }
+
+  // track currently-open thread on chatArea so we can avoid destructive rebuilds
+  const prevThread = chatArea.dataset.threadId || null;
+  chatArea.dataset.threadId = thread;
+
+  // If messagesList missing, create a scaffold WITHOUT touching existing siblings
+  let messagesList = chatArea.querySelector('#messagesList');
+  if(!messagesList){
+    // insert a minimal scaffold; keep existing content (header area sits elsewhere)
+    chatArea.insertAdjacentHTML('beforeend', `
+      <div class="messages-container">
+        <div class="messages" id="messagesList"></div>
+        <div class="message-input-container">
+          <div style="display:flex;gap:6px;align-items:center;">
+            <button id="attachImageBtn" class="modal-btn modal-btn-secondary" title="Attach image" style="height:40px;">📎</button>
+            <button id="attachGifBtn" class="modal-btn modal-btn-secondary" title="GIFs" style="height:40px;">📺</button>
+            <button id="emojiInsertBtn" class="modal-btn modal-btn-secondary" title="Insert emoji" style="height:40px;">😊</button>
+          </div>
+          <input type="text" class="message-input" id="activeMessageInput" placeholder="Message">
+          <button id="sendMessageBtn" class="modal-btn modal-btn-primary" style="height:40px;">Send</button>
+        </div>
+      </div>
+    `);
+    messagesList = chatArea.querySelector('#messagesList');
+  } else {
+    // messagesList exists — do not replace the input; just ensure input/buttons exist
+    const inputContainer = chatArea.querySelector('.message-input-container');
+    if(!inputContainer){
+      messagesList.insertAdjacentHTML('afterend', `
+        <div class="message-input-container">
+          <div style="display:flex;gap:6px;align-items:center;">
+            <button id="attachImageBtn" class="modal-btn modal-btn-secondary" title="Attach image" style="height:40px;">📎</button>
+            <button id="attachGifBtn" class="modal-btn modal-btn-secondary" title="GIFs" style="height:40px;">📺</button>
+            <button id="emojiInsertBtn" class="modal-btn modal-btn-secondary" title="Insert emoji" style="height:40px;">😊</button>
+          </div>
+          <input type="text" class="message-input" id="activeMessageInput" placeholder="Message">
+          <button id="sendMessageBtn" class="modal-btn modal-btn-primary" style="height:40px;">Send</button>
+        </div>
+      `);
+    }
+  }
+
+  // ensure hidden file input exists for attaching images
+  if(!document.getElementById('messageFile')){
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.id = 'messageFile';
+    fileInput.accept = 'image/*';
+    fileInput.style.display = 'none';
+    document.body.appendChild(fileInput);
+  }
+
+  // ---------- safe wiring for input & buttons (idempotent) ----------
+  const safeReplaceAndBind = (sel, bindFn) => {
+    const el = document.getElementById(sel);
+    if(!el) return;
+    const clone = el.cloneNode(true);
+    el.parentNode.replaceChild(clone, el);
+    bindFn(clone);
+  };
+
+  // input handlers
+  const inputEl = document.getElementById('activeMessageInput');
+  if(inputEl){
+    try { inputEl.removeEventListener('input', onMessageInput); } catch(_) {}
+    try { inputEl.removeEventListener('keydown', onMessageKeydown); } catch(_) {}
+    inputEl.addEventListener('input', onMessageInput);
+    inputEl.addEventListener('keydown', onMessageKeydown);
+    if (window.innerWidth > 768) {
+      try { inputEl.focus(); const len = inputEl.value ? inputEl.value.length : 0; inputEl.setSelectionRange(len, len); } catch(e){}
+    }
+  }
+
+  // send button
+  safeReplaceAndBind('sendMessageBtn', btn => {
+    btn.addEventListener('click', () => {
+      const v = (document.getElementById('activeMessageInput')?.value || '').trim();
+      if(v) sendMessageToActiveThread(v, null);
+    });
+  });
+
+  // attach image
+  safeReplaceAndBind('attachImageBtn', btn => {
+    btn.addEventListener('click', () => {
+      document.getElementById('messageFile')?.click();
+    });
+  });
+
+  // gif picker
+  safeReplaceAndBind('attachGifBtn', btn => {
+    btn.addEventListener('click', ev => {
+      ev.stopPropagation();
+      openGifPickerAt(btn);
+    });
+  });
+
+  // emoji insert
+  safeReplaceAndBind('emojiInsertBtn', btn => {
+    btn.addEventListener('click', ev => {
+      ev.stopPropagation();
+      openEmojiPickerAt(btn, emoji => {
+        insertEmojiAtInput(document.getElementById('activeMessageInput'), emoji);
+        closeEmojiPickerPopup();
+      });
+    });
+  });
+
+  // ---------- attach thread listener (this wires up messages rendering) ----------
+  attachThread(thread);
+
+  // After attachThread sets things up, try to mark last-read if appropriate:
+  try {
+    if (typeof fetchLastMessageTsForThread === 'function') {
+      fetchLastMessageTsForThread(thread).then(lastTs => {
+        setLastRead(thread, lastTs > 0 ? lastTs : Date.now());
+      }).catch(()=> {
+        setLastRead(thread, Date.now());
+      });
+    }
   } catch(e){}
 
-  attachThread(thread);
+  // done
 }
 
 
+
         function openChannel(channelName){
+                    const thread = threadIdForChannel(channelName);
+               subscribeTypingForThread = (thread) => {
+     // detach previous if you have code for that...
+     window.activeThreadId = thread;
+     // attach new:
+     onValue(ref(db, 'chat/typing/' + thread), showTypingAboveInput);
+   };
+
             document.getElementById('chatHeader').innerHTML = `<div class="channel-name">#${escapeHtml(channelName)}</div>`;
             // ensure left sidebar shows server channels
             showServerChannels();
-            const thread = threadIdForChannel(channelName);
+
             attachThread(thread);
+            
+  // If messagesList missing, create a scaffold WITHOUT touching existing siblings
+  let messagesList = chatArea.querySelector('#messagesList');
+  if(!messagesList){
+    // insert a minimal scaffold; keep existing content (header area sits elsewhere)
+    chatArea.insertAdjacentHTML('beforeend', `
+      <div class="messages-container">
+        <div class="messages" id="messagesList"></div>
+        <div class="message-input-container">
+          <div style="display:flex;gap:6px;align-items:center;">
+            <button id="attachImageBtn" class="modal-btn modal-btn-secondary" title="Attach image" style="height:40px;">📎</button>
+            <button id="attachGifBtn" class="modal-btn modal-btn-secondary" title="GIFs" style="height:40px;">📺</button>
+            <button id="emojiInsertBtn" class="modal-btn modal-btn-secondary" title="Insert emoji" style="height:40px;">😊</button>
+          </div>
+          <input type="text" class="message-input" id="activeMessageInput" placeholder="Message">
+          <button id="sendMessageBtn" class="modal-btn modal-btn-primary" style="height:40px;">Send</button>
+        </div>
+      </div>
+    `);
+    messagesList = chatArea.querySelector('#messagesList');
+  } else {
+    // messagesList exists — do not replace the input; just ensure input/buttons exist
+    const inputContainer = chatArea.querySelector('.message-input-container');
+    if(!inputContainer){
+      messagesList.insertAdjacentHTML('afterend', `
+        <div class="message-input-container">
+          <div style="display:flex;gap:6px;align-items:center;">
+            <button id="attachImageBtn" class="modal-btn modal-btn-secondary" title="Attach image" style="height:40px;">📎</button>
+            <button id="attachGifBtn" class="modal-btn modal-btn-secondary" title="GIFs" style="height:40px;">📺</button>
+            <button id="emojiInsertBtn" class="modal-btn modal-btn-secondary" title="Insert emoji" style="height:40px;">😊</button>
+          </div>
+          <input type="text" class="message-input" id="activeMessageInput" placeholder="Message">
+          <button id="sendMessageBtn" class="modal-btn modal-btn-primary" style="height:40px;">Send</button>
+        </div>
+      `);
+    }
+  }
         }
         
         // ---------------- Right-sidebar user search (debounced, highlights & filters) ----------------
@@ -4762,650 +5185,3 @@ try { checkClientVersionAndEnforce(); } catch(e){ /* ignore */ }
     </script>
 </body>
 </html>
-tetrischat.txt
-<script>
-(function(){
-  if (!window.firebase || !firebase.database) { console.warn('firebase missing'); return; }
-  const dbRoot = db, onlineRoot = dbRoot.ref('onlineUsers'), CHAT_ROOT = dbRoot.ref('chat'),
-        MSGS_REF = CHAT_ROOT.child('messages'), TYPING_REF = CHAT_ROOT.child('typing');
-
-  /* small helpers */
-  const $ = id => document.getElementById(id);
-  const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-  const now = ()=>Date.now();
-  const uidFor = u => (typeof safeKey === 'function')? safeKey(u): encodeURIComponent(u||'');
-  const MIN_W=180,MIN_H=120,ACTIVE_MS=15000,MAX_IMG_BYTES=220*1024,MAX_MSG_LOAD=200;
-  const onlinePanel = $('tetris-online-panel'), chatPanel = $('tetris-chat-panel');
-
-  /* geometry persistence (unchanged) */
-  const saveGeom = (id,r)=>{ try{ localStorage.setItem('t_geom_'+id,JSON.stringify(r)); }catch(e){} };
-  const loadGeom = id => { try{ const v=localStorage.getItem('t_geom_'+id); return v?JSON.parse(v):null }catch(e){return null} };
-  const applyGeom = (panel,id)=>{ const g=loadGeom(id); if(!g) return; const s=panel.style; if(g.left!=null)s.left=g.left+'px'; if(g.top!=null)s.top=g.top+'px'; if(g.width)s.width=g.width+'px'; if(g.height)s.height=g.height+'px'; };
-
-
-  /* draggable + resizable (unchanged) */
-  function makeDraggableResizable(panel,id){
-    const hdr = panel.querySelector('[data-drag-handle]'), res = panel.querySelector('.t-resize-handle');
-    const clamp = (v,min,max)=>Math.max(min,Math.min(max,v));
-    const start = (e,move,end)=>{ e.preventDefault(); const rect=panel.getBoundingClientRect(); const sx=e.clientX, sy=e.clientY; const offX=sx-rect.left, offY=sy-rect.top;
-      function mm(ev){ ev.preventDefault(); move(ev,rect,offX,offY); }
-      function up(ev){ try{ document.removeEventListener('pointermove',mm); document.removeEventListener('pointerup',up);}catch(e){} end(); }
-      document.addEventListener('pointermove',mm); document.addEventListener('pointerup',up);
-    };
-    hdr?.addEventListener('pointerdown', e => start(e, (ev,rect,offX,offY)=>{ let left=ev.clientX-offX, top=ev.clientY-offY; left=clamp(left,8,window.innerWidth-rect.width-8); top=clamp(top,8,window.innerHeight-rect.height-8); panel.style.left=left+'px'; panel.style.top=top+'px'; panel.style.right='auto'; }, ()=>{ const r=panel.getBoundingClientRect(); saveGeom(id,{left:Math.round(r.left),top:Math.round(r.top),width:Math.round(r.width),height:Math.round(r.height)}); }));
-    res?.addEventListener('pointerdown', e => start(e, (ev,rect)=>{ let w=rect.width+(ev.clientX-e.clientX), h=rect.height+(ev.clientY-e.clientY); w=clamp(w,MIN_W,window.innerWidth-24); h=clamp(h,MIN_H,window.innerHeight-24); panel.style.width=w+'px'; panel.style.height=h+'px'; }, ()=>{ const r=panel.getBoundingClientRect(); saveGeom(id,{left:Math.round(r.left),top:Math.round(r.top),width:Math.round(r.width),height:Math.round(r.height)}); }));
-  }
-  if (onlinePanel) makeDraggableResizable(onlinePanel,'online');
-  if (chatPanel)  makeDraggableResizable(chatPanel,'chat');
-
-  /* --- ONLINE PRESENCE & list (unchanged) --- */
-  const listEl = $('t-online-list'), countEl = $('t-online-count');
-  const players = {}; // key -> {root,dot,name,val}
-  function mkPlayerEl(key,val){
-    const root=document.createElement('div'); root.className='t-player'; root.dataset.key=key;
-    const dot=document.createElement('span'); dot.className='t-dot'; dot.setAttribute('aria-hidden','true');
-    const name=document.createElement('div'); name.textContent = val?.username||('#'+key); name.style.whiteSpace='nowrap'; name.style.overflow='hidden'; name.style.textOverflow='ellipsis'; name.style.maxWidth='150px';
-    root.appendChild(dot); root.appendChild(name);
-    return {root,dot,name,val};
-  }
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  /*
-  function refreshCount(){ countEl.textContent=String(Object.keys(players).length); listEl.style.display = Object.keys(players).length ? 'block' : 'none'; }
-  function refreshPlayer(key){ const p=players[key]; if(!p) return; p.name.textContent = (p.val&&p.val.username) || key; const last = p.val?.lastActive||0; const active = last && (now()-last<=ACTIVE_MS); p.dot.classList.toggle('on',!!active); p.dot.classList.toggle('off',!active); }
-  onlineRoot.on('child_added', snap => { const k=snap.key, v=snap.val()||{}; if(players[k]) { players[k].val=v; refreshPlayer(k); return; } const el=mkPlayerEl(k,v); el.val=v; players[k]=el; listEl.appendChild(el.root); refreshCount(); refreshPlayer(k); });
-  onlineRoot.on('child_changed', snap => { const k=snap.key, v=snap.val()||{}; if(players[k]){ players[k].val=v; refreshPlayer(k); }});
-  onlineRoot.on('child_removed', snap => { const k=snap.key; if(players[k]) try{ players[k].root.remove(); }catch(e){} delete players[k]; refreshCount(); });
-  setInterval(()=>Object.keys(players).forEach(k=>refreshPlayer(k)),2000);
-  */
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-
-  /* My presence management (unchanged) */
-  let myKey=null, myRef=null, presenceInterval=null, mySession=null;
-  async function startMyPresence(username){
-    if(!username) return;
-    try{
-      myKey = uidFor(username);
-      mySession = crypto.randomUUID ? crypto.randomUUID() : ('sess_'+Math.random().toString(36).slice(2,10));
-      myRef = onlineRoot.child(myKey);
-      await myRef.set({ username, lastActive: firebase.database.ServerValue.TIMESTAMP, session: mySession, meta: 'tetris-client' });
-      try{ myRef.onDisconnect().remove(); }catch(e){}
-      if(presenceInterval) clearInterval(presenceInterval);
-      presenceInterval = setInterval(()=>{ try{ myRef.update({ lastActive: firebase.database.ServerValue.TIMESTAMP, session: mySession }).catch(()=>{}); }catch(e){} },5000);
-    }catch(e){ console.warn('startMyPresence',e); }
-  }
-  async function stopMyPresence(){ try{ if(presenceInterval) clearInterval(presenceInterval); if(myRef){ await myRef.remove(); try{ myRef.onDisconnect().cancel(); }catch(e){} } }catch(e){ console.warn('stopMyPresence',e); } finally{ myKey=myRef=null; presenceInterval=null; } }
-
-  const origSignedIn = window.onSignedIn;
-  window.onSignedIn = function(...a){ try{ const user = (a && a[0]) ? a[0] : (CURRENT_USER?.username) || (typeof getLocalAuth==='function' && getLocalAuth()?.username); if(user) startMyPresence(user); }catch(e){} if(typeof origSignedIn==='function') try{ origSignedIn.apply(this,a); }catch(e){console.warn('onSignedIn wrapper',e)} };
-  try{ const cu = (CURRENT_USER && CURRENT_USER.username) ? CURRENT_USER.username : (typeof getLocalAuth === 'function' && getLocalAuth()?.username); if(cu) startMyPresence(cu); }catch(e){}
-  if(window.tetrisAuth?.signOut){ const orig=window.tetrisAuth.signOut; window.tetrisAuth.signOut = async function(...a){ try{ await stopMyPresence(); }catch(e){} return orig.apply(this,a); }; }
-  window.addEventListener('beforeunload', ()=>{ try{ if(myRef) myRef.remove(); }catch(e){} });
-
-  /* --- ENHANCED CHAT (password gated, bind UI, attach/detach) --- */
-  const CHAT_PASSWORD = 'CoconutCaleb27', SESSION_KEY='t_chat_unlocked_v1', BIND_KEY='t_chat_bind_v1';
-  const chatMessages = $('t-chat-messages'), chatInput = $('t-chat-input'), chatCount = $('t-chat-count'), chatFile = $('t-chat-file'), chatFileBtn = $('t-chat-filebtn'), chatSendBtn = $('t-chat-send'), chatTypingEl = $('t-chat-typing');
-  // initialize boolean from sessionStorage so unlocking persists in same tab
-  let chatUnlocked = false;
-  let observersInstalled=false, mutationObserver=null, handlers={added:null,removed:null,typing:null,changed:null}, bindState = JSON.parse(sessionStorage.getItem(BIND_KEY)||'null') || {mode:'Slash',key:'/'};
-
-  function createLockOverlay(){
-    if($('t-chat-lock-overlay')) return;
-    const ov = document.createElement('div'); ov.id='t-chat-lock-overlay';
-    ov.style.padding = '10px';
-    ov.style.marginTop = '50px';
-    ov.innerHTML = `<div id="t-chat-lock-inner">
-      <div style="font-weight:700;margin-bottom:6px">Enter chat password</div>
-      <input id="t-chat-password" type="password" placeholder="password" aria-label="chat password" style="width:100%;margin-bottom:8px"/>
-      <div style="display:flex;gap:8px;justify-content:center"><button id="t-chat-unlock">Unlock</button><button id="t-chat-unlock-cancel">Cancel</button></div>
-      <div style="font-size:12px;opacity:.8;margin-top:8px">Enter password to access Chat.</div>
-    </div>`;
-    chatPanel.appendChild(ov);
-    // event wiring
-    $('t-chat-unlock').addEventListener('click', ()=>{ const pw=$('t-chat-password').value||''; if(pw===CHAT_PASSWORD){ chatUnlocked=true; sessionStorage.setItem(SESSION_KEY,'1'); removeLockOverlay(); attachChatListeners(); } else alert('Incorrect password'); });
-    $('t-chat-unlock-cancel').addEventListener('click', ()=>{ $('t-chat-password').value=''; chatPanel.style.display='none'; });
-    // focus
-    setTimeout(()=>{ const pw=$('t-chat-password'); if(pw) pw.focus(); },50);
-  }
-  function removeLockOverlay(){ const el=$('t-chat-lock-overlay'); if(el) try{ el.remove(); }catch(e){} }
-
-  function createBindControls(){
-    if($('t-chat-bind-row')) return;
-    const hdr = chatPanel.querySelector('.hdr'); if(!hdr) return;
-    const row = document.createElement('div'); row.id='t-chat-bind-row'; row.innerHTML = `<select id="t-chat-bind-mode" title="Chat bind mode"><option>None</option><option>Slash</option><option>Enter</option><option>Custom</option></select><input id="t-chat-bind-key" maxlength="1" placeholder="K" style="width:32px;margin-left:6px"/>`;
-    hdr.appendChild(row);
-    const modeEl=$('t-chat-bind-mode'), keyEl=$('t-chat-bind-key');
-    modeEl.value = bindState.mode || 'Slash'; keyEl.value = bindState.key && bindState.mode==='Custom' ? bindState.key : '';
-    function saveBind(){ bindState.mode = modeEl.value; bindState.key = keyEl.value || bindState.key || '/'; sessionStorage.setItem(BIND_KEY,JSON.stringify(bindState)); }
-    modeEl.addEventListener('change', ()=>{ keyEl.style.display = modeEl.value==='Custom' ? 'inline-block' : 'none'; saveBind(); });
-    keyEl.addEventListener('input', ()=>{ if(keyEl.value.length>1) keyEl.value=keyEl.value.charAt(0); saveBind(); });
-    keyEl.style.display = modeEl.value==='Custom' ? 'inline-block' : 'none';
-  }
-
-  /* emoji utilities (NEW) */
-  const EMOJI_RECENTS_KEY = 't_recent_emojis';
-  // small set of emojis and categories; expand at will
-  const EMOJI_CATEGORIES = {
-    'clock': { title: 'Recent', emojis: [] },
-    'smileys': { title: 'Smileys', emojis: ['😀','😁','😂','🤣','🙂','😉','😍','😘','😎','🤔','😅','😭','😡','🤯','🤩','🤝','👍','👎','👏','🙌','🙏','🤞','💪','🎉'] },
-    'animals': { title: 'Animals', emojis: ['🐶','🐱','🐭','🐹','🐰','🦊','🐻','🐼','🐨','🐯','🦁','🐮','🐷','🐸','🐵','🦄'] },
-    'food': { title: 'Food', emojis: ['🍏','🍎','🍌','🍉','🍇','🍓','🍔','🍟','🍕','🌭','🍣','🍩','🍪','🍫'] },
-    'objects': { title: 'Objects', emojis: ['💡','🔔','📎','✂️','📷','💻','🔑','📱','🎧','⚙️','🔋','📅'] },
-    'symbols': { title: 'Symbols', emojis: ['❤️','💛','💚','💙','🖤','⭐','🔥','✨','⚡','☂️','✅','❌'] }
-  };
-
-  function getRecentEmojis(){
-    try{
-      const raw = localStorage.getItem(EMOJI_RECENTS_KEY) || '[]';
-      const arr = JSON.parse(raw);
-      return Array.isArray(arr) ? arr : [];
-    }catch(e){ return []; }
-  }
-  function saveRecentEmoji(emoji){
-    try{
-      const arr = getRecentEmojis();
-      const idx = arr.indexOf(emoji);
-      if(idx !== -1) arr.splice(idx,1);
-      arr.unshift(emoji);
-      arr.splice(24); // keep a cap
-      localStorage.setItem(EMOJI_RECENTS_KEY, JSON.stringify(arr));
-    }catch(e){ console.warn('saveRecentEmoji failed', e); }
-  }
-
-  // encode emoji as firebase-safe key
-  function encEmojiKey(emoji){
-    try{
-      return encodeURIComponent(emoji).replace(/\./g,'%2E');
-    }catch(e){
-      return btoa(String(emoji)).replace(/\=/g,'');
-    }
-  }
-  function decEmojiKey(key){
-    try{ return decodeURIComponent(key); }catch(e){ try{ return atob(key); }catch(err){ return key; } }
-  }
-
-  // Renders reaction area (for one message) given reactions object
-  function renderReactionsContainer(msgKey, reactions){
-    const container = document.createElement('div');
-    container.className = 't-emoji-reactions';
-    if(!reactions) return container;
-    const username = (CURRENT_USER && CURRENT_USER.username) ? CURRENT_USER.username : (typeof getLocalAuth==='function' && getLocalAuth()?.username) || 'guest';
-    const userKey = uidFor(username);
-    Object.keys(reactions).forEach(enc => {
-      const usersObj = reactions[enc] || {};
-      const emoji = decEmojiKey(enc);
-      const count = Object.keys(usersObj).length;
-      if(count <= 0) return;
-      const own = !!usersObj[userKey];
-      const btn = document.createElement('button');
-      btn.className = 't-emoji-reaction' + (own ? ' own' : '');
-      btn.title = `${count} reacted`;
-      btn.innerHTML = `<span style="font-size:18px;line-height:1">${emoji}</span><span style="font-size:12px;opacity:.9">${count}</span>`;
-      btn.addEventListener('click', ev => { ev.stopPropagation(); toggleReaction(msgKey, emoji); });
-      container.appendChild(btn);
-    });
-    return container;
-  }
-
-  // toggle reaction via firebase transaction
-  async function toggleReaction(msgKey, emoji){
-    try{
-      if(!msgKey) return;
-      if(!chatUnlocked){ createLockOverlay(); alert('Unlock chat first'); return; }
-      const username = (CURRENT_USER && CURRENT_USER.username) ? CURRENT_USER.username : (typeof getLocalAuth==='function' && getLocalAuth()?.username) || 'guest';
-      const userKey = uidFor(username);
-      const enc = encEmojiKey(emoji);
-      const ref = MSGS_REF.child(msgKey).child('reactions').child(enc);
-      await ref.transaction(current => {
-        current = current || {};
-        if(current[userKey]) {
-          delete current[userKey];
-        } else {
-          current[userKey] = true;
-        }
-        if(Object.keys(current).length === 0) return null;
-        return current;
-      });
-      // update recents locally
-      saveRecentEmoji(emoji);
-    }catch(e){ console.warn('toggleReaction failed', e); }
-  }
-
-  // Create or update a message DOM element (modified to include reactions + react button)
-  function addChatMessageToDOM(k,msg){
-    if(!chatMessages || !msg || !chatUnlocked) return;
-    if(document.getElementById('msg_'+k)) return; // already present
-    const local = (CURRENT_USER?.username) || (typeof getLocalAuth==='function' && getLocalAuth()?.username);
-    const isOwn = msg.username && local && String(msg.username)===String(local);
-    const el = document.createElement('div'); el.id='msg_'+k; el.className='t-chat-msg '+(isOwn?'own':'other');
-    const meta = document.createElement('div'); meta.className='t-chat-meta';
-    const name = document.createElement('strong'); name.textContent = esc(msg.username||'anon');
-    const time = document.createElement('span'); time.style.marginLeft='6px'; time.style.opacity='.8'; time.textContent = ' • ' + new Date((msg.ts && typeof msg.ts==='number')?msg.ts:Date.now()).toLocaleTimeString();
-    meta.appendChild(name); meta.appendChild(time);
-
-    // delete button for own messages
-    if(isOwn){ const del=document.createElement('button'); del.className='t-msg-delete'; del.title='Delete message'; del.textContent='Delete'; del.addEventListener('click', async ev=>{ ev.stopPropagation(); if(!confirm('Delete this message?')) return; try{ await MSGS_REF.child(k).remove(); }catch(e){ console.warn('del failed',e); } }); meta.appendChild(del); }
-
-    // reaction area
-    const reactionWrap = document.createElement('div'); reactionWrap.style.display='flex'; reactionWrap.style.alignItems='center'; reactionWrap.style.gap='6px';
-
-    // react button to open picker anchored to this message
-    const reactBtn = document.createElement('button'); reactBtn.className='t-react-btn'; reactBtn.textContent='React';
-    reactBtn.addEventListener('click', ev => {
-      ev.stopPropagation();
-      if(!chatUnlocked){ createLockOverlay(); alert('Unlock chat first'); return; }
-      openEmojiPicker({ anchorEl: reactBtn, onPick: (emoji)=>{ toggleReaction(k, emoji); closeEmojiPicker(); }, preferCategory: 'clock' });
-    });
-    reactionWrap.appendChild(reactBtn);
-
-    meta.appendChild(reactionWrap);
-
-    const body = document.createElement('div'); body.className='t-chat-body';
-    if(msg.text) body.innerHTML = esc(msg.text).replace(/\n/g,'<br>');
-    if(msg.image){ const img=document.createElement('img'); img.className='t-chat-img'; img.src=msg.image; img.alt=(msg.username||'')+' image'; body.appendChild(img); }
-
-    el.appendChild(meta);
-    el.appendChild(body);
-
-    // render reactions (if any)
-    const reactionsNode = msg.reactions || null;
-    const reactionsContainer = renderReactionsContainer(k, reactionsNode);
-    if(reactionsContainer && reactionsContainer.children.length) el.appendChild(reactionsContainer);
-
-    chatMessages.appendChild(el);
-    chatMessages.scrollTop=chatMessages.scrollHeight;
-    while(chatMessages.children.length>500) chatMessages.removeChild(chatMessages.firstChild);
-  }
-
-  /* attach/detach DB listeners for messages & typing */
-  function attachChatListeners(){
-    if(observersInstalled) return; // already attached
-    if(!chatUnlocked){ createLockOverlay(); return; }
-    observersInstalled=true;
-    handlers.added = snap => { const k=snap.key, v=snap.val()||{}; if(v.ts && typeof v.ts==='object' && v.ts['.sv']) v.ts = Date.now(); addChatMessageToDOM(k,v); };
-    handlers.removed = snap => { const el=document.getElementById('msg_'+snap.key); if(el) try{ el.remove(); }catch(e){} };
-    // NEW: child_changed to reflect live reaction updates or edits
-    handlers.changed = snap => { const k=snap.key, v=snap.val()||{}; const el = document.getElementById('msg_'+k); if(!el) {
-        // if not currently present (maybe scrolled out) add it
-        addChatMessageToDOM(k,v); return;
-      }
-      // update body text / image if changed
-      const body = el.querySelector('.t-chat-body');
-      if(body){
-        body.innerHTML = '';
-        if(v.text) body.innerHTML = esc(v.text).replace(/\n/g,'<br>');
-        if(v.image){ const img=document.createElement('img'); img.className='t-chat-img'; img.src=v.image; img.alt=(v.username||'')+' image'; body.appendChild(img); }
-      }
-      // update reactions area
-      const oldReactions = el.querySelector('.t-emoji-reactions');
-      if(oldReactions) oldReactions.remove();
-      const newReactions = renderReactionsContainer(k, v.reactions || null);
-      if(newReactions && newReactions.children.length) el.appendChild(newReactions);
-    };
-    handlers.typing = snap => { const m = snap.val()||{}; const names = Object.keys(m).filter(k=>!!m[k]); if(!names.length){ if(chatTypingEl) chatTypingEl.textContent=''; return; } const display = names.map(k=>decodeURIComponent(k)).slice(0,3); chatTypingEl.textContent = display.length===1?`${display[0]} is typing…`:(display.length===2?`${display[0]} & ${display[1]} are typing…`:`${display.slice(0,2).join(' & ')} are typing…`); };
-    try{ MSGS_REF.limitToLast(MAX_MSG_LOAD).on('child_added',handlers.added); MSGS_REF.on('child_removed',handlers.removed); MSGS_REF.on('child_changed', handlers.changed); TYPING_REF.on('value',handlers.typing); }catch(e){ console.warn('attachChatListeners failed',e); }
-    if(!mutationObserver){ mutationObserver = new MutationObserver(()=>{ if(!document.body.contains(chatPanel)){ console.warn('chat panel removed — detaching listeners'); stopChatListeners(); } }); mutationObserver.observe(document.body,{childList:true,subtree:true}); }
-  }
-
-  // detach but DO NOT create lock overlay or clear session key (used on hide)
-  function stopChatListeners(){
-    if(!observersInstalled) return;
-    try{
-      if(handlers.added) MSGS_REF.off('child_added',handlers.added);
-      if(handlers.removed) MSGS_REF.off('child_removed',handlers.removed);
-      if(handlers.changed) MSGS_REF.off('child_changed',handlers.changed);
-      if(handlers.typing) TYPING_REF.off('value',handlers.typing);
-    }catch(e){ console.warn('stopChatListeners error',e); }
-    observersInstalled=false;
-    handlers={added:null,removed:null,typing:null,changed:null};
-    if(chatMessages) chatMessages.innerHTML='';
-    if(chatTypingEl) chatTypingEl.textContent='';
-    try{ if(mutationObserver){ mutationObserver.disconnect(); mutationObserver=null; } }catch(e){}
-  }
-
-  // original detach which fully locks chat
-  function detachChatListeners(){
-    if(!observersInstalled) return;
-    try{ if(handlers.added) MSGS_REF.off('child_added',handlers.added); if(handlers.removed) MSGS_REF.off('child_removed',handlers.removed); if(handlers.changed) MSGS_REF.off('child_changed',handlers.changed); if(handlers.typing) TYPING_REF.off('value',handlers.typing); }catch(e){ console.warn('detach error',e); }
-    handlers={added:null,removed:null,typing:null,changed:null}; if(chatMessages) chatMessages.innerHTML=''; if(chatTypingEl) chatTypingEl.textContent=''; sessionStorage.removeItem(SESSION_KEY); chatUnlocked=false; createLockOverlay();
-    try{ if(mutationObserver){ mutationObserver.disconnect(); mutationObserver=null; } }catch(e){}
-  }
-
-  // Paste this inside the same IIFE (where MSGS_REF, chatInput, chatUnlocked, createLockOverlay exist)
-  async function sendMessage(text, image){
-    try{
-      if (!chatUnlocked) { createLockOverlay(); alert('Unlock chat first'); return; }
-      const txt = String(text || '').slice(0,500);
-      if (!txt && !image) { return; } // nothing to send
-
-      const username = (CURRENT_USER && CURRENT_USER.username) ? CURRENT_USER.username : (typeof getLocalAuth==='function' && getLocalAuth()?.username) || 'guest';
-      const payload = {
-        username,
-        ts: firebase.database.ServerValue.TIMESTAMP
-      };
-      if (txt) payload.text = txt;
-      if (image) payload.image = image;
-
-      // push the message
-      await MSGS_REF.push(payload);
-
-      // reset UI
-      if (chatInput) { chatInput.value = ''; chatCount.textContent = '0/500'; }
-      setTyping(false);
-    }catch(err){
-      console.error('sendMessage failed', err);
-      alert('Failed to send message: ' + (err && err.message));
-    }
-  }
-  // expose globally (optional)
-  window.sendMessage = sendMessage;
-
-
-  /* chat focus blocking */
-  function onChatFocus(){ window.chatFocused=true; try{ tetrisChat?.setTyping?.(true); }catch(e){} }
-  function onChatBlur(){ window.chatFocused=false; try{ tetrisChat?.setTyping?.(false); }catch(e){} }
-  chatInput?.addEventListener('focus', onChatFocus); chatInput?.addEventListener('blur', onChatBlur);
-
-  /* Send & file wiring (respect lock) */
-  $('t-chat-filebtn')?.addEventListener('click', ev=>{ if(!chatUnlocked){ ev.preventDefault(); alert('Unlock chat first'); createLockOverlay(); return; } chatFile?.click(); });
-
-  // NEW: Emoji button next to file attach opens picker for inserting into input
-  const emojiBtn = $('t-chat-emoji-btn');
-  emojiBtn?.addEventListener('click', ev=>{
-    ev.stopPropagation();
-    if(!chatUnlocked){ createLockOverlay(); alert('Unlock chat first'); return; }
-    openEmojiPicker({ anchorEl: emojiBtn, onPick: (emoji)=>{ insertEmojiAtCaret(chatInput, emoji); saveRecentEmoji(emoji); closeEmojiPicker(); }, preferCategory: 'clock' });
-  });
-
-  chatSendBtn?.addEventListener('click', ev=>{ if(!chatUnlocked){ ev.preventDefault(); alert('Unlock chat first'); createLockOverlay(); return; } if(typeof sendMessage==='function') sendMessage(chatInput.value, null); else chatSendBtn.closest('form')?.submit?.(); });
-
-  /* global key bind */
-  function globalKeyHandler(ev){
-    const active=document.activeElement;
-    if(active && (active.tagName==='INPUT' || active.tagName==='TEXTAREA' || active.isContentEditable)) return;
-    const mode = bindState.mode || 'Slash'; let bindKey = bindState.key || '/';
-    if(mode==='Slash') bindKey='/'; else if(mode==='Enter') bindKey='Enter';
-    if(mode==='None') return;
-    if((bindKey==='Enter' && ev.key==='Enter') || (bindKey.length===1 && ev.key===bindKey) || (bindKey==='/' && ev.key==='/')){
-      ev.preventDefault();
-      if(!chatUnlocked){ createLockOverlay(); const pw=$('t-chat-password'); if(pw) pw.focus(); return; }
-      chatInput?.focus();
-    }
-  }
-  document.addEventListener('keydown', globalKeyHandler, {capture:true});
-
-  /* clear button */
-  $('t-chat-clear')?.addEventListener('click', ()=>{ if(chatMessages) chatMessages.innerHTML=''; });
-
-  /* image processing helper (unchanged) */
-  function imageFileToDataURL(file, maxWidth=800, quality=0.72){
-    return new Promise((resolve,reject)=>{
-      try{
-        const r=new FileReader();
-        r.onerror = e => reject(e);
-        r.onload = ()=>{
-          const img=new Image();
-          img.onerror = e => reject(e);
-          img.onload = ()=>{
-            const scale = Math.min(1, maxWidth / img.width);
-            const w = Math.round(img.width * scale), h = Math.round(img.height * scale);
-            const c=document.createElement('canvas'); c.width=w; c.height=h; const ctx=c.getContext('2d'); ctx.drawImage(img,0,0,w,h);
-            function hasAlpha(){
-              try{
-                const total=w*h, max=1000, step=Math.max(1,Math.floor(Math.sqrt(total/max)));
-                const data=ctx.getImageData(0,0,w,h).data;
-                for(let y=0;y<h;y+=step) for(let x=0;x<w;x+=step){ const idx=(y*w+x)*4; if(data[idx+3]!==255) return true; }
-                return false;
-              }catch(err){ return file && file.type==='image/png'; }
-            }
-            const needsAlpha = hasAlpha();
-            resolve(needsAlpha?c.toDataURL('image/png'):c.toDataURL('image/jpeg',quality));
-          };
-          img.src = r.result;
-        };
-        r.readAsDataURL(file);
-      }catch(e){ reject(e); }
-    });
-  }
-
-  /* file handling */
-  chatFile?.addEventListener('change', async ev=>{
-    if(!chatUnlocked){ chatFile.value=''; alert('Unlock chat first'); createLockOverlay(); return; }
-    const f = chatFile.files && chatFile.files[0]; if(!f) return; if(!f.type.startsWith('image/')){ alert('Only images allowed'); chatFile.value=''; return; }
-    try{
-      let dataURL = await imageFileToDataURL(f,800,0.72);
-      let bytes = Math.round((dataURL.length*3)/4);
-      if(bytes > MAX_IMG_BYTES){
-        const smaller = await imageFileToDataURL(f,600,0.6);
-        const b2 = Math.round((smaller.length*3)/4);
-        if(b2 > MAX_IMG_BYTES){ if(!confirm('Image is still large and may fail to store. Continue?')) { chatFile.value=''; return; } }
-        if(typeof sendMessage==='function') await sendMessage(chatInput.value, smaller);
-      } else { if(typeof sendMessage==='function') await sendMessage(chatInput.value, dataURL); }
-    }catch(e){ console.warn('image processing failed',e); alert('Image processing failed. Try a smaller image.'); }
-    finally{ chatFile.value=''; }
-  });
-
-  /* typing indicator */
-  let typingTimer=null;
-  function setTyping(state){
-    try{
-      const username = (CURRENT_USER && CURRENT_USER.username) ? CURRENT_USER.username : (typeof getLocalAuth==='function' && getLocalAuth()?.username) || 'guest';
-      const key = uidFor(username);
-      if(!key) return;
-      const TR = TYPING_REF;
-      if(state){
-        TR.child(key).set(true);
-        if(typingTimer) clearTimeout(typingTimer);
-        typingTimer = setTimeout(()=>{ TR.child(key).set(false); typingTimer=null; },2000);
-      } else {
-        TR.child(key).set(false);
-        if(typingTimer) { clearTimeout(typingTimer); typingTimer=null; }
-      }
-    }catch(e){ console.warn('setTyping failed',e); }
-  }
-
-  /* tie typing to input */
-  chatInput?.addEventListener('input', e=>{ chatCount.textContent = `${e.target.value.length}/500`; setTyping(true); });
-  chatInput?.addEventListener('keydown', e=>{ if(e.key==='Enter' && (e.ctrlKey||e.metaKey)) return; if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); chatSendBtn?.click(); } });
-
-  /* --- new: stopChatListeners defined above --- */
-
-  /* attach/detach init */
-  function init(){ if(!chatUnlocked){ createLockOverlay(); if(chatMessages) chatMessages.innerHTML=''; } else { removeLockOverlay(); attachChatListeners(); } }
-  init();
-
-  // hookup the 'X' close button to hide chat + remove clear button + stop listeners
-  const chatCloseBtn = $('t-chat-close');
-  chatCloseBtn?.addEventListener('click', ()=>{
-    try{
-      const clearBtn = $('t-chat-clear');
-      if(clearBtn) clearBtn.remove();
-      // stop fetching messages/typing
-      stopChatListeners();
-      // hide panel
-      if(chatPanel) chatPanel.style.display = 'none';
-    }catch(e){ console.warn('chat close failed',e); }
-  });
-
-  window.tetrisChatEnhance = { attachChatListeners, detachChatListeners, stopChatListeners, isUnlocked: ()=>chatUnlocked, setTyping };
-
-  window.addEventListener('beforeunload', ()=>{ try{ setTyping(false); }catch(e){} });
-
-  /* --- SPACE-FIX: ensure inputs accept actual spaces when game captures space globally --- */
-  (function(){
-    function insertSpaceAtCaret(target){
-      try{
-        if(!target||target.readOnly||target.disabled) return;
-        const start = typeof target.selectionStart==='number' ? target.selectionStart : target.value.length;
-        const end = typeof target.selectionEnd==='number' ? target.selectionEnd : start;
-        const val = target.value || '';
-        const newVal = val.slice(0,start) + ' ' + val.slice(end);
-        target.value = newVal;
-        const pos = start + 1;
-        target.selectionStart = target.selectionEnd = pos;
-        target.dispatchEvent(new Event('input',{bubbles:true}));
-      }catch(e){ console.warn('insertSpaceAtCaret error',e); }
-    }
-    function attachSpaceFix(el){
-      if(!el) return;
-      el.addEventListener('keydown', function(ev){
-        if(ev.key===' '||ev.code==='Space'){ try{ insertSpaceAtCaret(ev.target); }catch(e){} try{ ev.stopImmediatePropagation(); }catch(e){} try{ ev.preventDefault(); }catch(e){} }
-      }, {capture:true,passive:false});
-      el.addEventListener('focus', ()=>{
-        function docCap(ev){ if(ev.key===' '||ev.code==='Space'){ try{ ev.stopImmediatePropagation(); }catch(e){} } }
-        document.addEventListener('keydown', docCap, {capture:true,passive:false});
-        el.addEventListener('blur', ()=>{ document.removeEventListener('keydown', docCap, {capture:true}); }, {once:true});
-      });
-    }
-    function runWhenReady(){
-      attachSpaceFix(document.getElementById('tetris-username'));
-      attachSpaceFix($('t-chat-input'));
-      document.addEventListener('focusin', e=>{ const t=e.target; if(!t) return; if(t.tagName==='INPUT'||t.tagName==='TEXTAREA'||t.isContentEditable) attachSpaceFix(t); });
-    }
-    if(document.readyState==='complete'||document.readyState==='interactive') runWhenReady(); else document.addEventListener('DOMContentLoaded', runWhenReady);
-  })();
-
-  /* ----------------- EMOJI PICKER UI (NEW) ----------------- */
-  let emojiPickerEl = null;
-  function closeEmojiPicker(){
-    try{ if(emojiPickerEl){ emojiPickerEl.remove(); emojiPickerEl=null; } }catch(e){}
-  }
-  function positionPicker(anchorEl, pickerEl){
-    if(!anchorEl || !pickerEl) return;
-    const rect = anchorEl.getBoundingClientRect();
-    // try place below anchor; if not enough space, place above
-    const topBelow = rect.bottom + 8;
-    const above = rect.top - pickerEl.offsetHeight - 8;
-    let top = topBelow;
-    if(top + pickerEl.offsetHeight > window.innerHeight - 8) {
-      top = Math.max(8, above);
-    }
-    let left = rect.left;
-    if(left + pickerEl.offsetWidth > window.innerWidth - 8) {
-      left = window.innerWidth - pickerEl.offsetWidth - 8;
-    }
-    pickerEl.style.left = Math.round(left) + 'px';
-    pickerEl.style.top = Math.round(top) + 'px';
-  }
-
-  // insert emoji into input at caret
-  function insertEmojiAtCaret(inputEl, emoji){
-    try{
-      if(!inputEl) return;
-      const start = typeof inputEl.selectionStart === 'number' ? inputEl.selectionStart : inputEl.value.length;
-      const end = typeof inputEl.selectionEnd === 'number' ? inputEl.selectionEnd : start;
-      const val = inputEl.value || '';
-      inputEl.value = val.slice(0,start) + emoji + val.slice(end);
-      const caret = start + emoji.length;
-      inputEl.selectionStart = inputEl.selectionEnd = caret;
-      inputEl.focus();
-      inputEl.dispatchEvent(new Event('input',{bubbles:true}));
-    }catch(e){ console.warn('insertEmojiAtCaret', e); }
-  }
-
-  function openEmojiPicker({ anchorEl=null, onPick=null, preferCategory='clock' } = {}){
-    closeEmojiPicker();
-    emojiPickerEl = document.createElement('div');
-    emojiPickerEl.className = 't-emoji-picker';
-    emojiPickerEl.setAttribute('role','dialog');
-    // tabs
-    const tabs = document.createElement('div'); tabs.className='t-emoji-tabs';
-    const categories = Object.keys(EMOJI_CATEGORIES);
-    categories.forEach(cat => {
-      const btn = document.createElement('button');
-      btn.className = 't-emoji-tab';
-      btn.textContent = EMOJI_CATEGORIES[cat].title || cat;
-      btn.addEventListener('click', ()=> {
-        buildGrid(cat);
-      });
-      tabs.appendChild(btn);
-    });
-    emojiPickerEl.appendChild(tabs);
-    const grid = document.createElement('div'); grid.className = 't-emoji-grid';
-    emojiPickerEl.appendChild(grid);
-
-    document.body.appendChild(emojiPickerEl);
-    // build grid for initial category (prefer recent/clock)
-    function buildGrid(cat){
-      grid.innerHTML = '';
-      let emojis = [];
-      if(cat === 'clock'){
-        emojis = getRecentEmojis();
-        if(!emojis || emojis.length===0) {
-          // fall back to smileys if none
-          emojis = EMOJI_CATEGORIES['smileys'].emojis.slice(0,24);
-        }
-      } else {
-        emojis = (EMOJI_CATEGORIES[cat] && EMOJI_CATEGORIES[cat].emojis) ? EMOJI_CATEGORIES[cat].emojis : [];
-      }
-      emojis.forEach(emo => {
-        const c = document.createElement('div');
-        c.className = 't-emoji-cell';
-        c.textContent = emo;
-        c.title = emo;
-        c.addEventListener('click', ev => {
-          ev.stopPropagation();
-          try{ if(typeof onPick === 'function') onPick(emo); }catch(e){ console.warn('emoji onPick error',e); }
-          saveRecentEmoji(emo);
-        });
-        grid.appendChild(c);
-      });
-    }
-
-    // initial tab pick
-    if(preferCategory && categories.includes(preferCategory)) buildGrid(preferCategory);
-    else buildGrid(categories[0]);
-
-    // position near anchor
-    setTimeout(()=>{ positionPicker(anchorEl || emojiBtn, emojiPickerEl); },20);
-
-    // close on outside click or ESC
-    function onDocClick(ev){
-      if(!emojiPickerEl) return;
-      if(ev.target && emojiPickerEl.contains(ev.target)) return;
-      closeEmojiPicker();
-      document.removeEventListener('pointerdown', onDocClick, true);
-      document.removeEventListener('keydown', onEsc, true);
-    }
-    function onEsc(ev){
-      if(ev.key === 'Escape'){ closeEmojiPicker(); document.removeEventListener('pointerdown', onDocClick, true); document.removeEventListener('keydown', onEsc, true); }
-    }
-    document.addEventListener('pointerdown', onDocClick, true);
-    document.addEventListener('keydown', onEsc, true);
-  }
-
-  // close when window resizes to avoid floating leftovers
-  window.addEventListener('resize', ()=>closeEmojiPicker());
-
-
-
-  /* ----------------- END EMOJI PICKER UI ----------------- */
-
-})();
-</script>
