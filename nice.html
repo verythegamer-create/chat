@@ -1,5 +1,3 @@
-d
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -2066,55 +2064,52 @@ function isImageUrl(url){
 }
 
 
-function renderMessagesForActiveThread(list){
-    const container = document.getElementById('messagesList');
-    if (!container) return;
+        function renderMessagesForActiveThread(list){
+    // Build HTML for messages (same for channels or DMs)
+    const containerHtml = [];
+list.forEach(msg => {
+  const who = msg.username || 'anon';
+  const time = (msg.ts && typeof msg.ts === 'number') ? new Date(msg.ts).toLocaleString() : 'Just now';
+  const avatar = getAvatarFor(who);
+  const avatarHtml = avatar
+    ? `<div class="message-avatar" style="background-image:url('${avatar}');background-size:cover;background-position:center;margin-right:16px;flex-shrink:0;width:40px;height:40px;border-radius:50%"></div>`
+    : `<div class="message-avatar" style="width:40px;height:40px;border-radius:50%;background:${who === (loadLocalUser()?.username) ? '#5865f2' : '#57a55a'};margin-right:16px;flex-shrink:0;"></div>`;
 
-    const html = [];
+  const imageHtml = msg.image ? `<img src="${escapeHtml(msg.image)}" class="message-image" alt="image">` : '';
+  containerHtml.push(`
+      <div class="message" data-msgkey="${escapeHtml(msg.key)}" data-ts="${escapeHtml(String(msg.ts || 0))}">
+          ${avatarHtml}
+          <div class="message-content">
+              <div class="message-header">
+                  <span class="message-author">${escapeHtml(who)}</span>
+                  <span class="message-time">${escapeHtml(time)}</span>
+              </div>
+              <div class="message-text">${escapeHtml(msg.text||'')}</div>
+              ${imageHtml}
+              <div class="reactions" data-reactions-for="${escapeHtml(msg.key)}"></div>
+              <div style="margin-top:8px;">
+                  <button class="modal-btn modal-btn-secondary react-open-btn" data-msg="${escapeHtml(msg.key)}" style="height:28px;padding:6px 10px">React</button>
+              </div>
+          </div>
+      </div>
+  `);
+});
 
-    list.forEach(msg => {
-        const who = msg.username || 'anon';
-        const time = (msg.ts && typeof msg.ts === 'number')
-            ? new Date(msg.ts).toLocaleString()
-            : 'Just now';
 
-        const avatar = getAvatarFor(who);
-        const avatarHtml = avatar
-          ? `<div class="message-avatar" style="background-image:url('${avatar}');background-size:cover;background-position:center;margin-right:16px;flex-shrink:0;width:40px;height:40px;border-radius:50%"></div>`
-          : `<div class="message-avatar" style="width:40px;height:40px;border-radius:50%;background:${who === (loadLocalUser()?.username) ? '#5865f2' : '#57a55a'};margin-right:16px;flex-shrink:0;"></div>`;
-
-        const imageHtml = msg.image
-          ? `<img src="${escapeHtml(msg.image)}" class="message-image" alt="image">`
-          : '';
-
-        html.push(`
-            <div class="message" data-msgkey="${escapeHtml(msg.key)}" data-ts="${escapeHtml(String(msg.ts || 0))}">
-                ${avatarHtml}
-                <div class="message-content">
-                    <div class="message-header">
-                        <span class="message-author">${escapeHtml(who)}</span>
-                        <span class="message-time">${escapeHtml(time)}</span>
-                    </div>
-                    <div class="message-text">${escapeHtml(msg.text||'')}</div>
-                    ${imageHtml}
-                    <div class="reactions" data-reactions-for="${escapeHtml(msg.key)}"></div>
-                    <div style="margin-top:8px;">
-                        <button class="modal-btn modal-btn-secondary react-open-btn"
-                                data-msg="${escapeHtml(msg.key)}"
-                                style="height:28px;padding:6px 10px">
-                            React
-                        </button>
-                    </div>
+    document.getElementById('chatArea').innerHTML = `
+        <div class="messages-container">
+            <div class="messages" id="messagesList">${containerHtml.join('')}</div>
+            <div class="message-input-container">
+                <div style="display:flex;gap:6px;align-items:center;">
+                  <button id="attachImageBtn" class="modal-btn modal-btn-secondary" title="Attach image" style="height:40px;">📎</button>
+                  <button id="attachGifBtn" class="modal-btn modal-btn-secondary" title="GIFs" style="height:40px;">📺</button>
+                  <button id="emojiInsertBtn" class="modal-btn modal-btn-secondary" title="Insert emoji" style="height:40px;">😊</button>
                 </div>
+                <input type="text" class="message-input" id="activeMessageInput" placeholder="Message">
+                <button id="sendMessageBtn" class="modal-btn modal-btn-primary" style="height:40px;">Send</button>
             </div>
-        `);
-    });
-
-    container.innerHTML = html.join('');
-}
-
-
-
+        </div>
+    `;
     
     
     // mark-read-on-user-action: scroll-to-bottom or focus input
